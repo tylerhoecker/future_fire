@@ -5,7 +5,7 @@ library(ncdf4)
 library(hexbin)
 
 # Trying out the climate space binning...
-region9_pointgrid <- read_sf("/Users/tylerhoecker/Box/Work/PhD/GIS/doi_12_unified_regions_20180801_shapefile/region9_pointgrid.shp")
+region9_pointgrid <- read_sf("/Users/tylerhoecker/Box/Work/GIS/doi_12_unified_regions_20180801_shapefile/region9_pointgrid.shp")
 
 point_sample <- region9_pointgrid %>% 
   st_transform(., crs = 4326) %>% 
