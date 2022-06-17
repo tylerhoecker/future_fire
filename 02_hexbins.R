@@ -2,17 +2,18 @@ library(tidyverse)
 library(sf)
 library(hexbin)
 library(tmap)
+library(geometry)
 
 # ------------------------------------------------------------------------------
 # Read in previously saved dataframe of fire, veg, climate dataframe
 # ------------------------------------------------------------------------------
-fire_veg_clim_df <- readRDS('data/fire_veg_clim_df.Rdata')
-forest_clim_df <- readRDS('data/forest_clim_df.Rdata')
+pyroclimate_input_df <- readRDS('data/process/pyroclimate_input_df.Rdata')
+forest_clim_df <- readRDS('data/process/forest_clim_df.Rdata')
 
 # ------------------------------------------------------------------------------
 # Hexbins: delineate tesselation of hexbins based on climate axes
 # ------------------------------------------------------------------------------
-# Sample size - used later here for convenience - equal support among pyromes
+# Sample size - used later, here for convenience - equal support among pyromes
 sample_min <- 1000
 
 # Number of bins in x direction
@@ -31,7 +32,7 @@ hex_custom <- function(x, y){
               'hex_df' = hex_df))
 }
 
-# Create for forest
+# Create for forest... just for plotting
 hexdf_forest <- hex_custom(forest_clim_df$def_hist, forest_clim_df$aet_hist)[['hex_df']]
 
 # Delete...
@@ -39,73 +40,187 @@ hexdf_forest <- hex_custom(forest_clim_df$def_hist, forest_clim_df$aet_hist)[['h
 #hexdf_nw <- hex_custom(nw_clim_df$def_hist, nw_clim_df$aet_hist)[['hex_df']] 
 
 # Same for the burned points
-hexdf_burned <-  hex_custom(fire_veg_clim_df$def_hist, fire_veg_clim_df$aet_hist)[['hex_df']] 
-# Filter out bins with less than minimum sample size
-hexdf_burned_n <- filter(hexdf_burned, counts > sample_min)
-  
+hexdf_burned <-  hex_custom(pyroclimate_input_df$def_hist, pyroclimate_input_df$aet_hist)[['hex_df']] 
 
 # Create same hexbins in the complete veg-fire df... 
-pyrome_df <- fire_veg_clim_df %>% 
+pyrome_df <- pyroclimate_input_df %>% 
   mutate(cell_hist = hex_custom(def_hist, aet_hist)[['hex']]@cID,
          cell_2C = hex_custom(def_2C, aet_2C)[['hex']]@cID) %>% 
   # Identify whether or not points move groups between periods
   mutate(change = ifelse(cell_2C == cell_hist, 0, 1)) %>% 
   group_by(cell_hist) %>%
   mutate(sample_n = n()) %>% 
-  ungroup() %>% 
-  # Some climate bins are poorly represented... remove these 
-  filter(sample_n >= sample_min) 
+  mutate(fires = length(unique(fire.id))) %>% 
+  ungroup() 
 
-# Same procedure for all forested points in the NW
+# Investigate the representativeness of the pyroclimates
+pyrome_df %>% 
+  group_by(cell_hist) %>% 
+  summarize(fires = length(unique(fire.id))) %>% 
+  summary()
+
+n_fires <- pyrome_df %>% 
+  group_by(cell_hist) %>% 
+  summarize(fires = mean(fires))
+
+pyrome_df <- pyrome_df %>% 
+  # Some climate bins are poorly represented... remove these 
+  # filter(sample_n >= sample_min) 
+  filter(fires >= 10)
+
+saveRDS(pyrome_df, 'data/process/pyrome_df.Rdata')
+
+# Update this hexbin df used for plotting to reflect those filtered out
+hexdf_burned_n <- hexdf_burned %>% 
+  filter(hexID %in% pyrome_df$cell_hist) %>% 
+  left_join(., n_fires, by = c('hexID' = 'cell_hist'))
+
+# Define forest vs non-forest using historical climate space of forest
+# Mark 2C bins that are outside of forest climate space
+forest_hull <- forest_clim_df %>% 
+  dplyr::select(def_hist, aet_hist) %>% 
+  as.matrix() %>% 
+  convhulln()
+
+is_forest <- forest_clim_df %>% 
+  dplyr::select(def_2C, aet_2C) %>% 
+  as.matrix() %>%
+  inhulln(forest_hull, .)
+
+# Same procedure for all forested points 
 forest_pyrome_df <- forest_clim_df %>% 
   mutate(cell_hist = hex_custom(def_hist, aet_hist)[['hex']]@cID,
          cell_2C = hex_custom(def_2C, aet_2C)[['hex']]@cID) %>% 
   # Identify whether or not points move groups between periods
-  mutate(change = ifelse(cell_2C == cell_hist, 0, 1)) 
+  mutate(change = ifelse(cell_2C == cell_hist, 0, 1),
+         forest = as.numeric(is_forest))
 
-# Randomly select a sample point from each region
-set.seed(1234)
-eg_data <- pyrome_df %>% 
-  group_by(region) %>% 
-  slice_sample(n = 1)
+saveRDS(forest_pyrome_df, 'data/process/forest_pyrome_df.Rdata')
+
+# How much area is represented by these pyroclimates?
+forest_pyrome_df %>% 
+  group_by(cell_hist) %>% 
+  filter(cell_hist %in% pyrome_df$cell_hist) %>% 
+  summarise(area = n()*0.6) %>% 
+  summary()
+  ggplot() +
+  geom_histogram(aes(x = area), bins = 100)
+
+forest_pyrome_df
+
+# # Save a raster of forest to non-forest transition
+# mast_rast <- raster('data/process/mast_rast.tif')
+# # Convert to spatial object (sf)
+# forest_pyrome_sf <- sf::st_as_sf(forest_pyrome_df, coords = c('x', 'y'), crs = 4326) 
+# r <- terra::rasterize(forest_pyrome_sf, mast_rast, field = 'forest', fun = modal, na.rm = T)
+# writeRaster(r, filename = paste0('data/emd/forest_','forest_trans','.tiff'), overwrite = T)
+
+# Trying out total forested area burned under reference and future...
+# ------------------------------------------------------------------------------
+is_for_ref <- pyrome_df %>% 
+  dplyr::select(def_hist, aet_hist) %>% 
+  as.matrix() %>%
+  inhulln(forest_hull, .)
+
+is_for_fut <- pyrome_df %>% 
+  dplyr::select(def_2C, aet_2C) %>% 
+  as.matrix() %>%
+  inhulln(forest_hull, .)
+
+for_burn_df <- pyrome_df %>% 
+  mutate(for_ref = is_for_ref,
+         for_fut = is_for_fut) %>% 
+  mutate(sev_cat = case_when(cbi <= 1 ~ 'Low',
+                             cbi > 1 & cbi <= 2 ~ 'Moderate',
+                             cbi > 2 & cbi <= 2.5 ~ 'High',
+                             cbi > 2.5 ~ 'Very high')) 
+
+
+reference_total <- for_burn_df %>% 
+  summarise(sev_cat = 'Any',
+            n_cells = n(),
+            ha = (n_cells * (30*30) * 0.0001), # 20 assumes 5% of Sean's data!!
+            km2 = ha*0.01,
+            time = 'Reference')
+
+reference_stats <- for_burn_df %>% 
+  group_by(sev_cat) %>% 
+  summarise(n_cells = n(),
+            ha = (n_cells * (30*30) * 0.0001),
+            km2 = ha*0.01,
+            time = 'Reference') %>% 
+  full_join(., reference_total)
+
+
+future_total <- for_burn_df[is_for_fut,] %>%  # Here I filter with this index of future forest
+  filter(cell_hist %in% pyrome_df$cell_2C) %>% 
+  summarise(sev_cat = 'Any',
+            n_cells = n(),
+            ha = (n_cells * (30*30) * 0.0001),
+            km2 = ha*0.01,
+            time = 'Future')
+
+future_stats <- for_burn_df[is_for_fut,] %>%  
+  filter(cell_hist %in% pyrome_df$cell_2C) %>% 
+  group_by(sev_cat) %>% 
+  summarise(n_cells = n(),
+            ha = (n_cells * (30*30) * 0.0001),
+            km2 = ha*0.01,
+            time = 'Future') %>% 
+  full_join(., future_total)
+
+for_burned_stats <- rbind(reference_stats, future_stats) %>% 
+  mutate(sev_cat = factor(sev_cat, levels = c('Any','Low','Moderate','High','Very high')))
+for_burned_stats
+
+burn_change_stats <- cbind(reference_stats[,c(1)],
+                           as.matrix(future_stats[,c(-1,-5)]) - as.matrix(reference_stats[,c(-1,-5)])) %>% 
+  mutate(sev_cat = factor(sev_cat, levels = c('Any','Low','Moderate','High','Very high')))
+burn_change_stats
+
+ggplot(for_burned_stats, aes(x = sev_cat, y = km2/1000*20)) +
+  geom_col(aes(fill = time), position = 'dodge')
+
+ggplot(burn_change_stats, aes(x = sev_cat, y = km2/1000*20)) +
+  geom_col(aes(fill = sev_cat), position = 'dodge')
 
 # ------------------------------------------------------------------------------
-# Save data that will be needed in part 03
-# ------------------------------------------------------------------------------
-saveRDS(pyrome_df, 'data/pyrome/pyrome_df.Rdata')
-saveRDS(forest_pyrome_df, 'data/pyrome/forest_pyrome_df.Rdata')
-
-
+  
 # ------------------------------------------------------------------------------
 # Plot climate space that is represented by these various geographies 
 # (all forest, burned forest, burned forest with > min_sample points)
 # ------------------------------------------------------------------------------
 # This is the climate space that is represented...
 ggplot() +
+  geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
   geom_hex(data = hexdf_forest, aes(x = x, y = y),
-           color = 'black', fill = 'grey80', stat = 'identity') +
+           color = 'grey50', fill = '#585858', stat = 'identity') +
   geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'black', fill = 'grey30', stat = 'identity') + #alpha = 0.7, 
-  geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = hexID),
-           color = 'black', alpha = 1, stat = 'identity') +
+           color = 'grey50', fill = '#ff0000', stat = 'identity') + #alpha = 0.7,
+  # geom_hex(data = hexdf_burned, aes(x = x, y = y, fill = test529),
+  #          color = 'black', alpha = 1, stat = 'identity') +
+  geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = fires),
+           color = 'black', stat = 'identity') +
+  #geom_text(data = hexdf_burned_n, aes(x = x, y = y)) +
   # geom_hex(data = hexdf_nw, aes(x = x, y = y),
   #          color = 'darkgreen', fill = 'transparent', alpha = 0.3, stat = 'identity') +
-  geom_point(data = eg_data,
-               aes(x = def_hist, y = aet_hist)) +
-  geom_curve(data = eg_data,
-               aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
-               arrow = arrow(length=unit(0.20,"cm")), curvature = -0.5) +
-  ggrepel::geom_label_repel(data = eg_data, aes(x = def_hist, y = aet_hist, label = region), 
-                            size = 2, box.padding = 0.05) +
-  scale_fill_gradient2('Climate Hexbin', 
-                       low = '#8c510a', mid = '#f6e8c3', high = '#01665e', 
-                       midpoint = 500) +
-  labs(y = 'AET', x = 'DEF') +
-  theme_bw() +
+  # geom_point(data = eg_data,
+  #              aes(x = def_hist, y = aet_hist), color = 'black', alpha = 0.7) +
+  # geom_curve(data = eg_data,
+  #              aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
+  #              arrow = arrow(length=unit(0.20,"cm")), curvature = -0.5) +
+  # ggrepel::geom_label_repel(data = eg_data, aes(x = def_hist, y = aet_hist, label = region), 
+  #                           size = 2, box.padding = 0.05) +
+  scale_fill_gradient('Fires observed', low = '#d70000', high = '#4c0000') +
+  # scale_fill_gradient2('Climate Hexbin',
+  #                      low = '#8c510a', mid = '#f6e8c3', high = '#01665e',
+  #                      midpoint = 500) +
+  labs(y = 'Moisture availability (AET, mm)', x = 'Moisture deficit (CWD, mm)') +
+  theme_bw(base_size = 16) +
   theme(legend.position = c(0.86,0.82),
         legend.background = element_blank())
 
-ggsave('whole_climate_hex.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
+ggsave('climate_hex_burned.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
        height = 6, width = 7, dpi = 300)
 
 # ------------------------------------------------------------------------------
@@ -145,7 +260,6 @@ tm_shape(boundary, bbox = pyrome_sf) +
 # tmap_save(filename = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/climate_map_egpts.png',
 #           width = 6, height = 10, dpi = 500)
 
-
 # ------------------------------------------------------------------------------
 # Plotting the 'pyrome' space
 # ------------------------------------------------------------------------------
@@ -159,32 +273,56 @@ ggplot(pyrome_plot) +
   geom_hex(aes(x = ndvi, y = cbi, fill = ..ndensity..), color = 'black', bins = 15) +
   facet_wrap(~cell_hist, labeller = labeller(cell_hist = eg_labs)) +
   scale_fill_viridis_c(option = "plasma") +
+  labs(x = 'Prefire NDVI', y = 'Modeled Composite Burn Index (CBI)') +
   theme_bw()
 
 ggsave('cbi-ndvi_egpts.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
        height = 8, width = 9, unit = 'in', dpi = 300)
 
 ggplot(pyrome_plot) +
-  geom_hex(aes(x = frp, y = cbi, fill = ..ndensity..), color = 'black', bins = 15) +
+  geom_hex(aes(x = fri, y = cbi, fill = ..ndensity..), color = 'black', bins = 15) +
   facet_wrap(~cell_hist, labeller = labeller(cell_hist = eg_labs)) +
   scale_fill_viridis_c(option = "plasma") +
+  xlim(c(0,300)) +
+  labs(x = 'Fire Rotaion Period (yrs)', y = 'Modeled Composite Burn Index (CBI)') +
   theme_bw()
 
 ggsave('frp-cbi_egpts.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
        height = 8, width = 9, unit = 'in', dpi = 300)
 
 ggplot(pyrome_plot) +
-  geom_hex(aes(x = ndvi, y = frp, fill = ..ndensity..), color = 'black', bins = 15) +
+  geom_hex(aes(x = frs, y = cbi, fill = ..ndensity..), color = 'black', bins = 15) +
   facet_wrap(~cell_hist, labeller = labeller(cell_hist = eg_labs)) +
   scale_fill_viridis_c(option = "plasma") +
+  #xlim(c(0,300)) +
+  labs(x = 'Fire Resistance Score', y = 'Modeled Composite Burn Index (CBI)') +
+  theme_bw()
+
+ggplot(pyrome_plot) +
+  geom_hex(aes(x = ndvi, y = fri, fill = ..ndensity..), color = 'black', bins = 15) +
+  facet_wrap(~cell_hist, labeller = labeller(cell_hist = eg_labs)) +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(x = 'Prefire NDVI', y = 'Fire Rotaion Period (yrs)') +
   theme_bw()
 
 ggsave('ndvi-frp_egpts.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
        height = 8, width = 9, unit = 'in', dpi = 300)
 # 
 # ------------------------------------------------------------------------------
-# An example...
+# Examples...
 # ------------------------------------------------------------------------------
+# Randomly select a sample point from each region
+# set.seed(1234)
+# eg_data <- pyrome_df %>% 
+#   group_by(region) %>% 
+#   slice_sample(n = 1)
+# 
+# hexdf_burned <- hexdf_burned %>%
+#   mutate(test529 = ifelse(hexID == 529, 50, 1),
+#          test529 = ifelse(hexID == 562, 100, test529))
+# 
+# test529_hex <- filter(hexdf_forest, hexID == 529)
+
 
 # Plot the reference and future pyromes for the example points
 eg_list <- eg_data %>%
@@ -251,7 +389,13 @@ example_plots <- function(eg){
 
   ggsave(paste0('ref_fut_eg', eg$region, '.png'),
                 path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
-                height = 5, width = 12, unit = 'in', dpi = 300)
+                height = 5, width = 8, unit = 'in', dpi = 300)
 }
 
 walk(eg_list, example_plots)
+
+# ------------------------------------------------------------------------------
+# END
+# ------------------------------------------------------------------------------
+
+
