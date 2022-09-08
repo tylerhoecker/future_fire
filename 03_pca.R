@@ -1,16 +1,22 @@
 library(tidyverse)
 library(factoextra)
+library(ggrepel)
 
 select <- dplyr::select
 
 # PCA --------------------------------------------------------------------------
-pyrome_df <- readRDS('data/process/pyrome_df.Rdata') %>% 
-  filter(log_fri != '-Inf')
+pyrome_df <- readRDS('data/process/pyrome_df.Rdata') 
 
-pca_df <- pyrome_df %>% 
-  select(cbi, ndvi, frs, log_fri)
+rescale0100 <- function(x){round(((x-min(x))/(max(x)-min(x)))*100,3)}
 
-pca_result <- prcomp(pca_df, scale = TRUE)
+rescale_pyrome_df <- pyrome_df %>% 
+  dplyr::select(cell_hist, cell_2C, cbi, ndvi, fri, log_fri, frs) %>% 
+  mutate(across(c(cbi, ndvi, fri, log_fri, frs), ~ rescale0100(.x), .names = 'z_{.col}'))
+
+pca_df <- rescale_pyrome_df %>% 
+  select(cbi, ndvi, log_fri)
+
+pca_result <- prcomp(pca_df, scale = TRUE) 
 
 # Visualize results
 fviz_eig(pca_result)
@@ -30,13 +36,14 @@ pyrome_pca_df <- pyrome_df %>%
 # Save this as pyrome_df for use in the adaptation script
 saveRDS(pyrome_pca_df, 'data/process/pyrome_df.Rdata')
 
+
 # Summarize PCA dimensions and climate for reference pyroclimates
 ref_pyros_pca <- pyrome_pca_df %>% 
   group_by(cell_hist) %>% 
-  summarize(ref_pca1_mean = mean(Dim.1),
-            ref_pca2_mean = mean(Dim.2),
-            ref_pca1_sd = sd(Dim.1),
-            ref_pca2_sd = sd(Dim.2),
+  summarize(ref_pca1_mean = mean(pca1),
+            ref_pca2_mean = mean(pca2),
+            ref_pca1_sd = sd(pca1),
+            ref_pca2_sd = sd(pca2),
             ref_aet_mean = mean(aet_hist),
             ref_def_mean = mean(def_hist),
             ref_aet_sd = sd(aet_hist),
@@ -50,10 +57,10 @@ ref_pyros_pca <- pyrome_pca_df %>%
 # Summarize PCA dimensions and climate for future pyroclimates
 fut_pyros_pca <- pyrome_pca_df %>% 
   group_by(cell_2C) %>% 
-  summarize(fut_pca1_mean = mean(Dim.1),
-            fut_pca2_mean = mean(Dim.2),
-            fut_pca1_sd = sd(Dim.1),
-            fut_pca2_sd = sd(Dim.2),
+  summarize(fut_pca1_mean = mean(pca1),
+            fut_pca2_mean = mean(pca2),
+            fut_pca1_sd = sd(pca1),
+            fut_pca2_sd = sd(pca2),
             fut_aet_mean = mean(aet_2C),
             fut_def_mean = mean(def_2C),
             fut_aet_sd = sd(aet_2C),
@@ -70,7 +77,7 @@ random_big_pyros <- pyrome_pca_df %>%
   mutate(pyro_size = n()) %>% 
   filter(pyro_size > 1000) %>% 
   summarize() %>% 
-  slice_sample(n = 100)
+  slice_sample(n = 150)
 
 
 # Extract loadings for plot
@@ -97,20 +104,20 @@ ggplot(plot_pyros_pca, aes(x = ref_pca1_mean, y = ref_pca2_mean)) +
   geom_errorbar(aes(xmin = ref_pca1_lo, xmax = ref_pca1_hi), width = 0, size = 0.5, alpha = 0.7) +
   geom_point(aes(fill = ref_def_mean), color = 'black', shape = 21, size = 2) +
   geom_label_repel(data = loadings, aes(x = PC1, y = PC2), 
-           label = c('Fire severity', 'Vegetation\nproductivity','Fire resistance','FRI'),
+           label = c('Burn severity', 'Vegetation productivity','FRP'),
            fill = c('grey'), alpha = 0.8, min.segment.length = 1) +
   scale_fill_gradientn('Climatic\nwater\ndeficit', colors = c('#01665e','#f6e8c3','#8c510a')) +
-  coord_cartesian(xlim = c(-1.25,1.25), ylim = c(-1.25,1.25)) +
-  theme_bw() +
+  coord_fixed(ratio = .94, xlim = c(-1.5,1.5), ylim = c(-1.5,1.5)) +
+  theme_bw(base_size = 14) +
   theme(axis.text = element_text(color = 'black'),
         legend.position = c(0.9,0.2),
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.text = element_text(size = 8)) +
-  labs(x = 'Principle component 1 (31%)', y = 'Principle component 2 (26%)')
+  labs(x = 'Principal component 1 (36%)', y = 'Principal component 2 (34%)')
 
-ggsave('pca_vectors.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
-       height = 5, width = 5, dpi = 500)
+ggsave('pca_vectors.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Main_Figs/',
+       height = 6, width = 6, dpi = 500)
 
 # Refernce and future pyromes connected as vectors
 ggplot(plot_pyros_pca) +
@@ -131,26 +138,66 @@ ggplot(plot_pyros_pca) +
   scale_fill_gradientn('Climatic\nwater\ndeficit', colors = c('#01665e','#f6e8c3','#8c510a')) +
   #coord_cartesian(xlim = c(-1.5,1.5), ylim = c(-1.5,1.5)) +
   coord_cartesian(xlim = c(-2,2), ylim = c(-2,2)) +
-  
   theme_bw() +
   theme(axis.text = element_text(color = 'black'),
         legend.position = c(0.9,0.2),
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.text = element_text(size = 8)) +
-  labs(x = 'Principle component 1 (31%)', y = 'Principle component 2 (26%)')
+  labs(x = 'Principle component 1 (36%)', y = 'Principle component 2 (34%)')
 
 
+#-------------------------------------------------------------------------------
+# Use this to quickly calculate mean changes and rasterize 
+# ------------------------------------------------------------------------------
+pyrome_df <- readRDS('data/process/pyrome_df.Rdata')
+
+rescale0100 <- function(x){round(((x-min(x))/(max(x)-min(x)))*100,3)}
 
 ref_pca_df <- pyrome_df %>% 
   group_by(cell_hist) %>% 
-  summarise(ref_sev = mean(Dim.1),
-            ref_freq = mean(Dim.2))
+  summarise(ref_pca1 = mean(rescale0100(pca1)),
+            ref_pca2 = mean(rescale0100(pca2)))
 
 fut_pca_df <- pyrome_df %>% 
   group_by(cell_2C) %>% 
-  summarise(fut_sev = mean(Dim.1),
-            fut_freq = mean(Dim.2))
+  summarise(fut_pca1 = mean(rescale0100(pca1)),
+            fut_pca2 = mean(rescale0100(pca2)))
+
+forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
+
+forest_pca_df <- full_join(forest_pyrome_df, ref_pca_df)
+forest_pca_df <- full_join(forest_pca_df, fut_pca_df)
+
+forest_pca_df <- forest_pca_df %>% 
+  mutate(pca1_diff = fut_pca1-ref_pca1,
+         pca2_diff = fut_pca2-ref_pca2) 
+
+forest_pca_df <- forest_pca_df %>% 
+  filter(!is.na(ref_pca1)) 
+
+forest_pca_sf <- sf::st_as_sf(forest_pca_df, coords = c('x', 'y'), crs = 4326) 
+mast_rast <- raster::raster('data/process/mast_rast.tif')
+
+list('ref_pca1','ref_pca2','fut_pca1','fut_pca2','pca1_diff','pca2_diff') %>%  
+  walk(function(x) {
+    print(paste0('Rasterizing ',x,'...'))
+    r <- terra::rasterize(forest_pca_sf, mast_rast, 
+                          field = x, fun = mean, na.rm = T)
+    print(paste0('Writing data/emd/',x,'.tiff'))
+    raster::writeRaster(r, filename = paste0('data/emd/',x,'.tiff'), overwrite = T)
+    return(r)
+  }) 
+
+
+
+r <- terra::rasterize(forest_pca_sf, mast_rast, field = 'mode_regime', fun = modal, na.rm = T)
+
+writeRaster(r, filename = paste0('data/emd/regime_pca','.tiff'), overwrite = T)
+
+saveRDS(pyrome_pca_df, 'data/process/pyrome_df.Rdata')
+
+#-------------------------------------------------------------------------------
 
 cell_pairs <- forest_pyrome_df %>% 
   group_by(cell_hist, cell_2C) %>% 
@@ -171,10 +218,10 @@ ggplot(regime_change_df) +
   xlim(c(-1,1)) + ylim(c(-1,1))
 
 pyrome_pca_df <- pyrome_pca_df %>% 
-  mutate(regime = case_when(Dim.1 < 0 & Dim.2 < 0 ~ 1, #'Severe-Inrequent',
-                            Dim.1 < 0 & Dim.2 > 0 ~ 2, #'Severe-Frequent',
-                            Dim.1 > 0 & Dim.2 > 0 ~ 3, #'Insevere-Frequent',
-                            Dim.1 > 0 & Dim.2 < 0 ~ 4)) #'Insevere-Infrequent'))
+  mutate(regime = case_when(pca1 < 0 & pca2 < 0 ~ 1, #'Severe-Inrequent',
+                            pca1 < 0 & pca2 > 0 ~ 2, #'Severe-Frequent',
+                            pca1 > 0 & pca2 > 0 ~ 3, #'Insevere-Frequent',
+                            pca1 > 0 & pca2 < 0 ~ 4)) #'Insevere-Infrequent'))
 
 Mode <- function(x) {
   ux <- unique(x)

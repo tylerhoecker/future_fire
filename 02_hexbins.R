@@ -68,13 +68,6 @@ pyrome_df <- pyrome_df %>%
   # filter(sample_n >= sample_min) 
   filter(fires >= 10)
 
-saveRDS(pyrome_df, 'data/process/pyrome_df.Rdata')
-
-# Update this hexbin df used for plotting to reflect those filtered out
-hexdf_burned_n <- hexdf_burned %>% 
-  filter(hexID %in% pyrome_df$cell_hist) %>% 
-  left_join(., n_fires, by = c('hexID' = 'cell_hist'))
-
 # Define forest vs non-forest using historical climate space of forest
 # Mark 2C bins that are outside of forest climate space
 forest_hull <- forest_clim_df %>% 
@@ -93,20 +86,41 @@ forest_pyrome_df <- forest_clim_df %>%
          cell_2C = hex_custom(def_2C, aet_2C)[['hex']]@cID) %>% 
   # Identify whether or not points move groups between periods
   mutate(change = ifelse(cell_2C == cell_hist, 0, 1),
-         forest = as.numeric(is_forest))
+         forest = as.numeric(is_forest)) %>% 
+  # FIRE ROTATION PERIOD HAPPENS HERE NOW -------------------------------------
+  # Calculate proportion of climate bins that burned
+  group_by(cell_hist) %>% 
+  mutate(area_burn = sum(burned*area),
+         area_total = sum(area),
+         prop_burn = area_burn/area_total,
+         prop_burn = ifelse(prop_burn < 0.035, 0.035, prop_burn),
+         frp_cell = 35/prop_burn,
+         log_frp_cell = log(frp_cell))
+
+hist(forest_pyrome_df$frp_cell, breaks = 30)
+
+unique_frp <- forest_pyrome_df %>% 
+  distinct(cell_hist,frp_cell)
+
+hist(unique_frp$frp_cell, breaks = 30)
 
 saveRDS(forest_pyrome_df, 'data/process/forest_pyrome_df.Rdata')
 
-# How much area is represented by these pyroclimates?
-forest_pyrome_df %>% 
-  group_by(cell_hist) %>% 
-  filter(cell_hist %in% pyrome_df$cell_hist) %>% 
-  summarise(area = n()*0.6) %>% 
-  summary()
-  ggplot() +
-  geom_histogram(aes(x = area), bins = 100)
+# Add this new FRP version to pyrome_df
+pyrome_df <- full_join(pyrome_df, unique_frp) %>% 
+  filter(!is.na(cell_2C))
 
-forest_pyrome_df
+saveRDS(pyrome_df, 'data/process/pyrome_df.Rdata')
+
+# Update this hexbin df used for plotting to reflect those filtered out
+hexdf_burned_n <- hexdf_burned %>% 
+  filter(hexID %in% pyrome_df$cell_hist) %>% 
+  left_join(., n_fires, by = c('hexID' = 'cell_hist')) %>% 
+  left_join(., unique_frp, by = c('hexID' = 'cell_hist')) 
+
+
+# How much area is represented by these pyroclimates?
+hist(test$area)
 
 # # Save a raster of forest to non-forest transition
 # mast_rast <- raster('data/process/mast_rast.tif')
@@ -114,6 +128,102 @@ forest_pyrome_df
 # forest_pyrome_sf <- sf::st_as_sf(forest_pyrome_df, coords = c('x', 'y'), crs = 4326) 
 # r <- terra::rasterize(forest_pyrome_sf, mast_rast, field = 'forest', fun = modal, na.rm = T)
 # writeRaster(r, filename = paste0('data/emd/forest_','forest_trans','.tiff'), overwrite = T)
+
+# ------------------------------------------------------------------------------
+# Plot climate space that is represented by these various geographies 
+# (all forest, burned forest, burned forest with > min_sample points)
+# ------------------------------------------------------------------------------
+eg_data <- pyrome_df %>% 
+  group_by(cell_hist) %>% 
+  slice_head(n = 1) %>% 
+  ungroup() %>% 
+  slice_sample(n = 35)
+
+
+# This is the climate space that is represented...
+ggplot() +
+  geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
+  geom_hex(data = hexdf_forest, aes(x = x, y = y),
+           color = 'grey50', fill = '#585858', stat = 'identity') +
+  geom_hex(data = hexdf_burned, aes(x = x, y = y),
+           color = 'grey50', fill = '#ff0000', stat = 'identity') + #alpha = 0.7,
+  # geom_hex(data = hexdf_burned, aes(x = x, y = y, fill = test529),
+  #          color = 'black', alpha = 1, stat = 'identity') +
+  geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = fires),
+           color = 'black', stat = 'identity') +
+  #geom_text(data = hexdf_burned_n, aes(x = x, y = y)) +
+  # geom_hex(data = hexdf_nw, aes(x = x, y = y),
+  #          color = 'darkgreen', fill = 'transparent', alpha = 0.3, stat = 'identity') +
+  # geom_point(data = eg_data,
+  #              aes(x = def_hist, y = aet_hist), color = 'black', alpha = 0.7) +
+  geom_curve(data = eg_data,
+               aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
+               arrow = arrow(length=unit(0.15,"cm")), 
+             color = 'white', curvature = -0.5, size = 0.7) +
+  # ggrepel::geom_label_repel(data = eg_data, aes(x = def_hist, y = aet_hist, label = region), 
+  #                           size = 2, box.padding = 0.05) +
+  scale_fill_gradient('Fires observed', low = '#d70000', high = '#4c0000',
+                      limits = c(0,150), breaks = c(10,50,100,150)) +
+  # scale_fill_gradient2('Climate Hexbin',
+  #                      low = '#8c510a', mid = '#f6e8c3', high = '#01665e',
+  #                      midpoint = 500) +
+  labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
+  theme_bw(base_size = 14) +
+  theme(legend.position = c(0.86,0.82),
+        legend.background = element_blank())
+
+ggsave('climate_hex_burned.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs/',
+       height = 6, width = 7, dpi = 500)
+
+# FRP in climate space
+hexdf_forest <- hexdf_forest %>% 
+  left_join(., unique_frp, by = c('hexID' = 'cell_hist')) 
+
+
+ggplot() +
+  geom_hex(data = hexdf_forest, aes(x = x, y = y, fill = frp_cell),
+           color = 'black', stat = 'identity') +
+  scale_fill_gradient('Fire rotation (yrs)', low = '#d70000', high = '#4c0000') +
+  labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
+  theme_bw(base_size = 14) +
+  theme(legend.position = c(0.86,0.82),
+        legend.background = element_blank())
+# ------------------------------------------------------------------------------
+# Mapping
+# ------------------------------------------------------------------------------
+# Plot on map
+# State boundaries for reference
+boundary <- read_sf("C:\\Users\\hoecker\\Work\\GIS\\cb_2018_us_state_20m\\cb_2018_us_state_20m.shp") %>%
+  st_transform(., crs = 4326)
+# 
+# # Remake spatial version of veg-fire df now that it includes hexbin info
+pyrome_sf <- st_as_sf(pyrome_df, coords = c('x', 'y'), crs = 4326)
+
+plot_df <- pyrome_df %>% 
+  slice_sample(n = 100000)
+
+plot_sf <- st_as_sf(plot_df, coords = c('x', 'y'), crs = 4326)
+eg_sf <- st_as_sf(eg_data, coords = c('x', 'y'), crs = 4326)
+
+tm_shape(boundary, bbox = pyrome_sf) +
+  tm_borders() +
+  tm_fill(col = 'grey10') +
+  tm_shape(plot_sf) +
+  tm_dots(title = 'Climate Bin',
+          col = 'cell_hist',
+          size = 0.003,
+          palette = c('#8c510a','#f6e8c3','#01665e'),
+          style = 'cont',
+          shape = 15) +
+  tm_shape(eg_sf) +
+  tm_dots(size = 0.2, col = 'grey90', border.col = 'red', shape = 21) +
+  tm_text(text = 'region', col = 'black', auto.placement=F, just=c("left", "top"), 
+          bg.color = 'white', bg.alpha = 0.6) +
+  tm_layout(legend.outside = TRUE)
+
+# Mysteriously starting throwing an error...
+# tmap_save(filename = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/climate_map_egpts.png',
+#           width = 6, height = 10, dpi = 500)
 
 # Trying out total forested area burned under reference and future...
 # ------------------------------------------------------------------------------
@@ -185,80 +295,8 @@ ggplot(burn_change_stats, aes(x = sev_cat, y = km2/1000*20)) +
   geom_col(aes(fill = sev_cat), position = 'dodge')
 
 # ------------------------------------------------------------------------------
-  
-# ------------------------------------------------------------------------------
-# Plot climate space that is represented by these various geographies 
-# (all forest, burned forest, burned forest with > min_sample points)
-# ------------------------------------------------------------------------------
-# This is the climate space that is represented...
-ggplot() +
-  geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
-  geom_hex(data = hexdf_forest, aes(x = x, y = y),
-           color = 'grey50', fill = '#585858', stat = 'identity') +
-  geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'grey50', fill = '#ff0000', stat = 'identity') + #alpha = 0.7,
-  # geom_hex(data = hexdf_burned, aes(x = x, y = y, fill = test529),
-  #          color = 'black', alpha = 1, stat = 'identity') +
-  geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = fires),
-           color = 'black', stat = 'identity') +
-  #geom_text(data = hexdf_burned_n, aes(x = x, y = y)) +
-  # geom_hex(data = hexdf_nw, aes(x = x, y = y),
-  #          color = 'darkgreen', fill = 'transparent', alpha = 0.3, stat = 'identity') +
-  # geom_point(data = eg_data,
-  #              aes(x = def_hist, y = aet_hist), color = 'black', alpha = 0.7) +
-  # geom_curve(data = eg_data,
-  #              aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
-  #              arrow = arrow(length=unit(0.20,"cm")), curvature = -0.5) +
-  # ggrepel::geom_label_repel(data = eg_data, aes(x = def_hist, y = aet_hist, label = region), 
-  #                           size = 2, box.padding = 0.05) +
-  scale_fill_gradient('Fires observed', low = '#d70000', high = '#4c0000') +
-  # scale_fill_gradient2('Climate Hexbin',
-  #                      low = '#8c510a', mid = '#f6e8c3', high = '#01665e',
-  #                      midpoint = 500) +
-  labs(y = 'Moisture availability (AET, mm)', x = 'Moisture deficit (CWD, mm)') +
-  theme_bw(base_size = 16) +
-  theme(legend.position = c(0.86,0.82),
-        legend.background = element_blank())
 
-ggsave('climate_hex_burned.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire',
-       height = 6, width = 7, dpi = 300)
 
-# ------------------------------------------------------------------------------
-# Mapping
-# ------------------------------------------------------------------------------
-# Plot on map
-# State boundaries for reference
-boundary <- read_sf("C:\\Users\\hoecker\\Work\\GIS\\cb_2018_us_state_20m\\cb_2018_us_state_20m.shp") %>%
-  st_transform(., crs = 4326)
-# 
-# # Remake spatial version of veg-fire df now that it includes hexbin info
-pyrome_sf <- st_as_sf(pyrome_df, coords = c('x', 'y'), crs = 4326)
-
-plot_df <- pyrome_df %>% 
-  slice_sample(n = 100000)
-
-plot_sf <- st_as_sf(plot_df, coords = c('x', 'y'), crs = 4326)
-eg_sf <- st_as_sf(eg_data, coords = c('x', 'y'), crs = 4326)
-
-tm_shape(boundary, bbox = pyrome_sf) +
-  tm_borders() +
-  tm_fill(col = 'grey10') +
-  tm_shape(plot_sf) +
-  tm_dots(title = 'Climate Bin',
-          col = 'cell_hist',
-          size = 0.003,
-          palette = c('#8c510a','#f6e8c3','#01665e'),
-          style = 'cont',
-          shape = 15) +
-  tm_shape(eg_sf) +
-  tm_dots(size = 0.2, col = 'grey90', border.col = 'red', shape = 21) +
-  tm_text(text = 'region', col = 'black', auto.placement=F, just=c("left", "top"), 
-          bg.color = 'white', bg.alpha = 0.6) +
-  tm_layout(legend.outside = TRUE)
-
-# Mysteriously starting throwing an error...
-# tmap_save(filename = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/climate_map_egpts.png',
-#           width = 6, height = 10, dpi = 500)
 
 # ------------------------------------------------------------------------------
 # Plotting the 'pyrome' space
