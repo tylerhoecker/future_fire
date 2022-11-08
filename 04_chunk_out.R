@@ -17,8 +17,8 @@ cell_pairs <- forest_pyrome_df %>%
   split(seq(nrow(.)))
 
 rescale_pyrome_df <- pyrome_df %>% 
-  dplyr::select(cell_hist, cell_2C, cbi, ndvi, log_fri, frs, pca1, pca2) %>% 
-  mutate(across(c(cbi, ndvi, log_fri, frs, pca1, pca2), ~ rescale0100(.x), .names = 'z_{.col}'))
+  dplyr::select(cell_hist, cell_2C, cbi, ndvi, log_frp_cell, pca1, pca2) %>% 
+  mutate(across(c(cbi, ndvi, log_frp_cell, pca1, pca2), ~ rescale0100(.x), .names = 'z_{.col}'))
 
 # ------------------------------------------------------------------------------
 # Create and save chunks of data to optimize parallel processing 

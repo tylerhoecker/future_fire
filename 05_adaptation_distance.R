@@ -14,6 +14,8 @@ library(infer)
 # fut_df_x <- readRDS(paste0('data/process/chunks/fut_df_list_',x,'.Rdata'))
 # cell_pairs_x <- readRDS(paste0('data/process/chunks/cell_pairs',x,'.Rdata'))
 # index = 1; ref_df = ref_df_x[[index]]; fut_df = fut_df_x[[index]]; cell_pairs = cell_pairs_x[[index]]
+rescale01 <- function(x){round(((x-min(x))/(max(x)-min(x))),3)}
+
 calc_emds <- function(ref_df, fut_df, cell_pairs, index){
   
   print(paste0('Cell pair ',index, ': ', cell_pairs[1],',',cell_pairs[2]))
@@ -29,7 +31,9 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
     "multi_emd_90" = 0,
     "cbi_dir"  = 0,
     "ndvi_dir" = 0,
-    "fri_dir"  = 0,
+    "frp_dir"  = 0,
+    "pca1_dir" = 0,
+    "pca2_dir" = 0,
     'case'     = 0 # 0 = NO CHANGE
   )
   
@@ -41,7 +45,7 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
   } else if(nrow(ref_df) == 0 & nrow(fut_df) != 0) {
     output_df <- output_df %>%  
       mutate(across(c(multi_emd_50, multi_emd_10, multi_emd_90, 
-                      cbi_dir, ndvi_dir, fri_dir),
+                      cbi_dir, ndvi_dir, frp_dir),
                     ~ case_when(. == 0 ~ NA)),
              case = 1) # 1 = NO FOREST FIRE REFERENCE, YES FIRE FUTURE
     
@@ -49,16 +53,16 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
   } else if(nrow(ref_df) != 0 & nrow(fut_df) == 0) {
     output_df <- output_df %>% 
       mutate(across(c(multi_emd_50, multi_emd_10, multi_emd_90, 
-                      cbi_dir, ndvi_dir, fri_dir),
+                      cbi_dir, ndvi_dir, frp_dir),
                     ~ case_when(. == 0 ~ NA)),
              case = 2) # 2 = YES FOREST FIRE REFERENCE, NO FIRE FUTURE
     
   } else if(nrow(ref_df) == 0 & nrow(fut_df) == 0) {
     output_df <- output_df %>% 
       mutate(across(c(multi_emd_50, multi_emd_10, multi_emd_90, 
-                      cbi_dir, ndvi_dir, fri_dir),
+                      cbi_dir, ndvi_dir, frp_dir),
                     ~ case_when(. == 0 ~ NA)),
-             case = 3) # 2 = NO FOREST FIRE REFERENCE OR FUTURE ("forest" but never was, never will be flammable)
+             case = 3) # 3 = NO FOREST FIRE REFERENCE OR FUTURE ("forest" but never was, never will be flammable)
     
     # Otherwise, there are data to compare... calculate EMD between ref and fut
   } else {
@@ -107,7 +111,7 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
       set_names('ref','fut') %>%
       map(function(df){
         df %>%
-          dplyr::select(z_cbi, z_ndvi, z_log_fri) %>%
+          dplyr::select(pca1, pca2) %>% #z_cbi, z_ndvi, z_log_fri
           infer::rep_slice_sample(n = 500, reps = n_reps) %>%
           group_map(~rep_prep(.x))
       })
@@ -124,10 +128,12 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
       mutate(multi_emd_50 = quantile(rep_emds, 0.50, na.rm = T),
              multi_emd_10 = quantile(rep_emds, 0.10, na.rm = T),
              multi_emd_90 = quantile(rep_emds, 0.90, na.rm = T),
-             cbi_dir  = mean(fut_df$cbi) - mean(ref_df$cbi),
-             ndvi_dir = mean(fut_df$ndvi) - mean(ref_df$ndvi),
-             fri_dir  = mean(fut_df$log_fri) - mean(ref_df$log_fri),
-             case = 4) # "TYPICAL" CASE - observations of fire in reference and future
+             cbi_dir  = (mean(fut_df$cbi) - mean(ref_df$cbi))/mean(ref_df$cbi),
+             ndvi_dir = (mean(fut_df$ndvi) - mean(ref_df$ndvi))/mean(ref_df$ndvi),
+             frp_dir  = mean(exp(fut_df$log_frp_cell)) - mean(exp(ref_df$log_frp_cell)),
+             pca1_dir = mean(rescale01(fut_df$pca1)) - mean(rescale01(ref_df$pca1)),
+             pca2_dir = mean(rescale01(fut_df$pca2)) - mean(rescale01(ref_df$pca2)),
+             case = 4) # 4 = "TYPICAL" CASE - observations of fire in reference and future
   }
 }
 
@@ -165,8 +171,8 @@ emd_chunk_df <- c(1:40) %>%
     return(emd_df)
   })
 
-saveRDS(emd_chunk_df, 'data/emd/emd_2022_08_26.Rdata')
-#emd_chunk_df <- readRDS('data/emd/emd_2022_06_28.Rdata')
+saveRDS(emd_chunk_df, 'data/emd/emd_2022_09_28.Rdata')
+emd_chunk_df <- readRDS('data/emd/emd_2022_09_21.Rdata')
 
 # ------------------------------------------------------------------------------
 # Temp. additions until can add above - update cases to ID dry vs wet
@@ -185,11 +191,6 @@ library(raster)
 # Read in the master grid as raster!
 mast_rast <- raster('data/process/mast_rast.tif')
 
-r = mast_rast
-r_area = area(mast_rast)
-r_area_forest = r_area*r  #!is.na(r)
-cellStats(r_area_forest, mean)
-
 # Join to dataframe of reference and future climate bins for all forested cells
 forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
 pyrome_emd_df <- full_join(forest_pyrome_df, emd_chunk_df) %>% 
@@ -207,8 +208,7 @@ pyrome_emd_sf <- sf::st_as_sf(pyrome_emd_df, coords = c('x', 'y'), crs = 4326)
 
 # Rasterize and write out the TIFFs
 
-
-list('multi_emd_50','cbi_dir','ndvi_dir','fri_dir') %>%  
+list('multi_emd_50','cbi_dir','ndvi_dir','frp_dir','pca1_dir','pca2_dir') %>%  
   walk(function(x) {
     print(paste0('Rasterizing ',x,'...'))
     r <- terra::rasterize(pyrome_emd_sf, mast_rast, 
@@ -229,45 +229,12 @@ list('case', 'loss_case') %>%
   }) 
 
 # ------------------------------------------------------------------------------
-# "Adaptive capacity" - calculate and write out rasters for QGIS mapping
-# ------------------------------------------------------------------------------
-# Update the FRS raster to reflect the EMD raster 
-frs_rast <- terra::rast('data/composition/frs_spatial.tif')
-frs_rast <- terra::project(frs_rast, y = "epsg:4326")
-
-frs_coarse <- terra::aggregate(frs_rast,
-                               fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
-                               fun = 'modal', na.rm = T)
-
-emd_rast <- terra::rast('data/emd/forest_multi_emd_50.tiff')
-
-frs_coarse <- terra::mask(frs_coarse, emd_rast)
-
-raster::writeRaster(frs_coarse, 'data/process/frs_coarse.tif', overwrite = T)
-
-frs_coarse <- rast('data/process/frs_coarse.tif')
-
-# Reclassify based on a threshold for availability of resistance species 
-m <- c(0, 0.4, -1,
-       0.4, 1, 1)
-rclmat <- matrix(m, ncol=3, byrow=TRUE)
-frs_thresh <- terra::classify(frs_coarse, rclmat, include.lowest=TRUE)
-
-raster::writeRaster(frs_thresh, 'data/process/frs_thres04.tif', overwrite = T)
-
-# adapt_cap <- frs_thresh * emd_rast
-# 
-# raster::writeRaster(adapt_cap, 'data/emd/adapt_cap_03.tif', overwrite = T)
-
-
-# ------------------------------------------------------------------------------
 # Summarize into firesheds 
 # ------------------------------------------------------------------------------
 library(sf)
-
 # Join to dataframe of reference and future climate bins for all forested cells
 forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
-emd_df <- readRDS('data/emd/emd_2022_08_02.Rdata')
+emd_df <- readRDS('data/emd/emd_2022_09_28.Rdata')
 
 length(distinct(emd_df, cell_hist, cell_2C)$cell_hist)
 
@@ -313,16 +280,18 @@ firesheds_frs <- terra::extract(frs_rast, firesheds_within, fun = mean, na.rm = 
 firesheds_emd_frs_sf <- firesheds_emd_poly %>% 
   # Divide into groups for bivariate chloropleth categorization
   mutate(frs = firesheds_frs$frs_spatial,
-         cat1 = case_when(adapt_dist <= 12 ~ 'A',
-                          adapt_dist > 12 & adapt_dist <= 20 ~ 'B',
-                          adapt_dist > 20 ~ 'C'),
-         cat2 = case_when(frs <= 0.38 ~ '3',
-                          frs > 0.38 & frs <= 0.54 ~ '2',
-                          frs > 0.54 ~ '1')) %>% 
+         cat1 = case_when(adapt_dist <= quantile(firesheds_emd_poly$adapt_dist, 0.33) ~ 'A',
+                          adapt_dist > quantile(firesheds_emd_poly$adapt_dist, 0.33) & 
+                            adapt_dist <= quantile(firesheds_emd_poly$adapt_dist, 0.66) ~ 'B',
+                          adapt_dist > quantile(firesheds_emd_poly$adapt_dist, 0.66) ~ 'C'),
+         cat2 = case_when(frs <= quantile(firesheds_frs$frs_spatial, 0.33) ~ '3',
+                          frs > quantile(firesheds_frs$frs_spatial, 0.33) & 
+                            frs <= quantile(firesheds_frs$frs_spatial, 0.66) ~ '2',
+                          frs > quantile(firesheds_frs$frs_spatial, 0.66) ~ '1')) %>% 
   unite('bicat', cat1, cat2) %>% 
   dplyr::select(Area_HA, Fireshed_I, Fireshed_N, adapt_dist, frs, bicat)
   
-st_write(firesheds_emd_frs_sf, 'data/emd/bivariate_firesheds_test.shp')
+st_write(firesheds_emd_frs_sf, 'data/emd/bivariate_firesheds.shp', append= F)
 
 mast_rast <- terra::rast('data/process/mast_rast.tif')
 
@@ -338,7 +307,43 @@ firesheds_df <- data.frame(
   'adapt_dist' = terra::extract(emd_rast, firesheds)
 )
 
+# ------------------------------------------------------------------------------
+# "Adaptive capacity" - calculate and write out rasters for QGIS mapping
+# ------------------------------------------------------------------------------
+# Update the FRS raster to reflect the EMD raster 
+frs_rast <- terra::rast('data/composition/frs_spatial.tif')
+frs_rast <- terra::project(frs_rast, y = "epsg:4326")
 
+frs_coarse <- terra::aggregate(frs_rast,
+                               fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
+                               fun = 'modal', na.rm = T)
+
+emd_rast <- terra::rast('data/emd/forest_multi_emd_50.tiff')
+
+frs_coarse <- terra::mask(frs_coarse, emd_rast)
+
+raster::writeRaster(frs_coarse, 'data/process/frs_coarse.tif', overwrite = T)
+
+frs_coarse <- rast('data/process/frs_coarse.tif')
+
+# Reclassify based on a threshold for availability of resistance species 
+m <- c(0, 0.4, -1,
+       0.4, 1, 1)
+rclmat <- matrix(m, ncol=3, byrow=TRUE)
+frs_thresh <- terra::classify(frs_coarse, rclmat, include.lowest=TRUE)
+
+raster::writeRaster(frs_thresh, 'data/process/frs_thres04.tif', overwrite = T)
+
+# adapt_cap <- frs_thresh * emd_rast
+# 
+# raster::writeRaster(adapt_cap, 'data/emd/adapt_cap_03.tif', overwrite = T)
+
+
+
+# r = mast_rast
+# r_area = area(mast_rast)
+# r_area_forest = r_area*r  #!is.na(r)
+# cellStats(r_area_forest, mean)
 
 
 

@@ -169,10 +169,10 @@ forest_type_egs <- fireshed_df %>%
 
 # Colored by bivariate group
 ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
-  geom_vline(aes(xintercept = 15)) +
-  geom_vline(aes(xintercept = 20)) +
-  geom_hline(aes(yintercept = 0.38)) +
-  geom_hline(aes(yintercept = 0.54)) +
+  # geom_vline(aes(xintercept = 15)) +
+  # geom_vline(aes(xintercept = 20)) +
+  # geom_hline(aes(yintercept = 0.38)) +
+  # geom_hline(aes(yintercept = 0.54)) +
   # geom_errorbar(aes(xmin = lo_adapt, xmax = hi_adapt), width = 0, size = 0.5, alpha = 0.7) +
   # geom_errorbar(aes(ymin = lo_frs, ymax = hi_frs), width = 0, size = 0.5, alpha = 0.7) +
   geom_point(aes(fill = bicat), color = 'black', shape = 21, size = 2) +
@@ -195,7 +195,7 @@ ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
 
  ggplot(fireshed_df) +
    geom_histogram(aes(x = tree_group, fill = bicat), stat="count", color = 'black') +
-   scale_fill_manual(values = c('A_1'='#e8e8e8','A_2'='#cbb8d7','A_3'='#9972af',
+   scale_fill_manual(values = c('A_1'='#aaaaaa','A_2'='#cbb8d7','A_3'='#9972af',
                                 'B_1'='#e4d9ac','B_2'='#c8ada0','B_3'='#976b82',
                                 'C_1'='#c8b35a','C_2'='#af8e53','C_3'='#804d36'),
                      guide = 'none') +
@@ -221,10 +221,10 @@ forest_type_1 <-
    slice_sample(n = 1) 
  
  ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
-   geom_vline(aes(xintercept = 15)) +
-   geom_vline(aes(xintercept = 20)) +
-   geom_hline(aes(yintercept = 0.38)) +
-   geom_hline(aes(yintercept = 0.54)) +
+   geom_vline(aes(xintercept = 0.8)) +
+   geom_vline(aes(xintercept = 1.02)) +
+   geom_hline(aes(yintercept = 0.41)) +
+   geom_hline(aes(yintercept = 0.51)) +
    geom_point(aes(fill = tree_group), 
               alpha = 0.7, color = 'black', shape = 21, size = 2) +
    geom_label_repel(data = forest_type_1,
