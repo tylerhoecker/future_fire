@@ -63,9 +63,6 @@ ggplot(pyrome_emd_df, aes(x = multi_emd_50, y = one_group, fill = stat(x))) +
         panel.background = element_blank(),
         panel.grid = element_blank())
 
-ggsave('emd_ridges.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
-       height = 7, width = 5, dpi = 600)
-
 ggsave('emd_density.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
        height = 3, width = 6, dpi = 600)
 
@@ -95,11 +92,58 @@ ggplot(pyrome_emd_df, aes(x = cbi_dir*100, y = one_group, fill = stat(x))) +
         panel.background = element_blank(),
         panel.grid = element_blank())
 
-
-ggsave('cbi_delta_ridges.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs/',
-       height = 7, width = 5, dpi = 600)
-
 ggsave('cbi_density.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
+       height = 3, width = 6, dpi = 600)
+
+# ------------------------------------------------------------------------------
+# FRP change 
+# ------------------------------------------------------------------------------
+ggplot(pyrome_emd_df, aes(x = frp_dir, y = one_group, fill = stat(x))) +
+  geom_density_ridges_gradient(bandwidth = 20) +
+  #geom_vline(aes(xintercept = 0), linetype = 'dashed') +
+  #geom_vline(aes(xintercept = -0.3), linetype = 'dashed') +
+  #geom_vline(aes(xintercept = 0.3), linetype = 'dashed') +
+  scale_fill_distiller(palette = 'RdYlBu', direction = 1, 
+                       limits = c(-200,200), oob = scales::squish, guide = 'none') +
+  #coord_cartesian(xlim = c(-0.6, 0.6)) +
+  scale_x_continuous(breaks = seq(-750,750,250)) +
+  labs(y = '', x = 'Change in FRP (yrs)') +
+  theme_bw(base_size = 14) +
+  theme(axis.text = element_text(color = 'black'),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  theme(rect = element_rect(fill = "transparent"),
+        panel.background = element_blank(),
+        panel.grid = element_blank())
+
+ggsave('frp_density.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
+       height = 3, width = 6, dpi = 600)
+
+# ------------------------------------------------------------------------------
+# NDVI change 
+# ------------------------------------------------------------------------------
+ggplot(pyrome_emd_df, aes(x = ndvi_dir, y = one_group, fill = stat(x))) +
+  geom_density_ridges_gradient(bandwidth = 0.008) +
+  #geom_vline(aes(xintercept = 0), linetype = 'dashed') +
+  #geom_vline(aes(xintercept = -0.3), linetype = 'dashed') +
+  #geom_vline(aes(xintercept = 0.3), linetype = 'dashed') +
+  scale_fill_gradient2(low = '#a6611a', mid = '#ebf9b3', high = '#046235',
+                       limits = c(-0.10,0.10), oob = scales::squish,
+                       guide = 'none') +
+  #coord_cartesian(xlim = c(-0.6, 0.6)) +
+  scale_x_continuous(breaks = seq(-3,3,1)/10) +
+  labs(y = '', x = 'Change in productivity (NDVI)') +
+  theme_bw(base_size = 14) +
+  theme(axis.text = element_text(color = 'black'),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  theme(rect = element_rect(fill = "transparent"),
+        panel.background = element_blank(),
+        panel.grid = element_blank())
+
+ ggsave('ndvi_density.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
        height = 3, width = 6, dpi = 600)
 
 # ------------------------------------------------------------------------------
