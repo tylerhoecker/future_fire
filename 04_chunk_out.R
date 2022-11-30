@@ -1,3 +1,6 @@
+# This step is purely mechanical 
+# It creates subsets of data that are called upon during a parallel processing step
+
 library(tidyverse)
 
 # ------------------------------------------------------------------------------

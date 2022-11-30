@@ -1,14 +1,11 @@
-# ------------------------------------------------------------------------------
-# Create ridge-style density plots of change in dimensions to accompany, eg., maps
-# ------------------------------------------------------------------------------
+# Explores results in each pyroclimate dimension
+
 library(tidyverse)
 library(ggridges)
 library(sf)
 library(terra)
 library(raster)
 select <- dplyr::select
-
-
 
 # ------------------------------------------------------------------------------
 # EMD
@@ -255,46 +252,3 @@ writeRaster(r, filename = paste0('data/emd/forest_','loss_case','.tiff'), overwr
 
 
  
-# ------------------------------------------------------------------------------
-# OLD
-# ------------------------------------------------------------------------------
-pyrome_df <- readRDS('data/process/pyrome_df.Rdata')
-
-change_df <- pyrome_df %>% 
-  group_by(cell_hist) %>% 
-  mutate(across(c(ndvi, log_fri, frs, cbi), mean, 
-                .names = "ref_mean_{.col}")) %>% 
-  group_by(cell_2C) %>% 
-  mutate(across(c(ndvi, log_fri, frs, cbi), mean, 
-                .names = "fut_mean_{.col}")) %>% 
-  ungroup() %>% 
-  mutate(delta_ndvi = fut_mean_ndvi - ref_mean_ndvi,
-         delta_log_fri = fut_mean_log_fri - ref_mean_log_fri,
-         delta_frs = fut_mean_frs - ref_mean_frs,
-         delta_cbi = fut_mean_cbi - ref_mean_cbi) %>% 
-  dplyr::select(ndvi, log_fri, frs, cbi, starts_with('delta')) %>% 
-  distinct()
-
-plot_df <- change_df %>% 
-  slice_sample(n = 10000)
-
-ggplot(plot_df) +
-  geom_point(aes(x = cbi, y = delta_pca1))
-
-ggplot(change_df) +
-  geom_point(aes(x = frs, y = delta_pca1))
-
-ggplot(change_df) +
-  geom_histogram(aes(x = delta_pca2)) +
-  facet_wrap(~region, scales = 'free')
-
-
-
-
-  pivot_longer(cols = starts_with('delta'), names_to = 'dimension', values_to = 'delta')
-  
-ggplot(change_df) +
-  geom_histogram(aes(x = delta)) +
-  geom_vline(aes(xintercept = mean(delta))) +
-  facet_wrap(~dimension, scales = 'free_x')
-

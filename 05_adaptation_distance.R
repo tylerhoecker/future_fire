@@ -1,5 +1,9 @@
+# This step performs the Earth Mover's Distance calculation
+# EMD results are written out as rasters
+# EMD results are pair with fire resistance trait data, then are
+# summarized into firesheds and written out
+
 library(tidyverse) # Carpentry tools
-#library(tidymodels)
 library(furrr)     # Parralell computing
 library(emdist)    # Earth Movers Distance
 library(tictoc)
@@ -293,57 +297,7 @@ firesheds_emd_frs_sf <- firesheds_emd_poly %>%
   
 st_write(firesheds_emd_frs_sf, 'data/emd/bivariate_firesheds.shp', append= F)
 
-mast_rast <- terra::rast('data/process/mast_rast.tif')
 
-
-
-emd_rast <- terra::rast('data/emd/forest_multi_emd_50.tiff')
-plot(emd_rast)
-summary(emd_rast)
-
-length(emd_rast[emd_rast == 0])
-
-firesheds_df <- data.frame(
-  'adapt_dist' = terra::extract(emd_rast, firesheds)
-)
-
-# ------------------------------------------------------------------------------
-# "Adaptive capacity" - calculate and write out rasters for QGIS mapping
-# ------------------------------------------------------------------------------
-# Update the FRS raster to reflect the EMD raster 
-frs_rast <- terra::rast('data/composition/frs_spatial.tif')
-frs_rast <- terra::project(frs_rast, y = "epsg:4326")
-
-frs_coarse <- terra::aggregate(frs_rast,
-                               fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
-                               fun = 'modal', na.rm = T)
-
-emd_rast <- terra::rast('data/emd/forest_multi_emd_50.tiff')
-
-frs_coarse <- terra::mask(frs_coarse, emd_rast)
-
-raster::writeRaster(frs_coarse, 'data/process/frs_coarse.tif', overwrite = T)
-
-frs_coarse <- rast('data/process/frs_coarse.tif')
-
-# Reclassify based on a threshold for availability of resistance species 
-m <- c(0, 0.4, -1,
-       0.4, 1, 1)
-rclmat <- matrix(m, ncol=3, byrow=TRUE)
-frs_thresh <- terra::classify(frs_coarse, rclmat, include.lowest=TRUE)
-
-raster::writeRaster(frs_thresh, 'data/process/frs_thres04.tif', overwrite = T)
-
-# adapt_cap <- frs_thresh * emd_rast
-# 
-# raster::writeRaster(adapt_cap, 'data/emd/adapt_cap_03.tif', overwrite = T)
-
-
-
-# r = mast_rast
-# r_area = area(mast_rast)
-# r_area_forest = r_area*r  #!is.na(r)
-# cellStats(r_area_forest, mean)
 
 
 

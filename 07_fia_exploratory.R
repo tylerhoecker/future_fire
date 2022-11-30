@@ -1,7 +1,9 @@
+# This step relates exposure results to forest composition, using FIA data
+# Calculate dominate species in each fireshed and pairs with exposure
+
 library(tidyverse)
 library(sf)
 library(terra)
-#library(raster)
 library(ggrepel)
 select <- dplyr::select
 

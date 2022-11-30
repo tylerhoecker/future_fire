@@ -1,3 +1,7 @@
+# Performs a PCA on pyroclimate dimensions to reduce from 3 to 2
+# Creates plots
+# Saves output for next step
+
 library(tidyverse)
 library(factoextra)
 library(ggrepel)
@@ -33,36 +37,6 @@ pyrome_pca_df <- pyrome_df %>%
          'fires' = pyrome_df$fires)
 # Save this as pyrome_df for use in the adaptation script
 # saveRDS(pyrome_pca_df, 'data/process/pyrome_df.Rdata')
-
-# PCA GAM ----------------------------------------------------------------------
-library(mgcv)
-library(mgcViz)
-
-# Create a small version of the df for experimentation
-model_df <- pyrome_pca_df %>% 
-  select(c(X,Y, starts_with(c('aet','def','pca')))) %>% 
-  sample_n(100000)
-
-# Predict PCA1 (Productivity-Severity)
-gam_pca1 <- bam(pca1 ~ s(def_hist, aet_hist),
-               data = model_df, 
-               method = 'REML')
-summary(gam_pca1)
-gam.check(gam_pca1)
-plot(gam_pca1)
-b <- getViz(gam_pca1)
-plot(sm(b, 1)) + l_fitRaster() + l_fitContour() + l_points()
-
-# Predict PCA2 (FRP)
-gam_pca2 <- bam(pca2 ~ s(def_hist, aet_hist),
-                data = model_df, 
-                method = 'REML')
-summary(gam_pca2)
-gam.check(gam_pca2)
-b <- getViz(gam_pca2)
-plot(sm(b, 1)) + l_fitRaster() + l_fitContour() + l_points()
-
-# ------------------------------------------------------------------------------
 
 # Plotting ---------------------------------------------------------------------
 # Summarize PCA dimensions and variables for reference pyroclimates
@@ -249,148 +223,8 @@ ggplot(plot_pca) +
   labs(x = 'Principle component 1 (36%)', y = 'Principle component 2 (34%)')
 
 
-#-------------------------------------------------------------------------------
-# Use this to quickly calculate mean changes and rasterize 
-# ------------------------------------------------------------------------------
-pyrome_df <- readRDS('data/process/pyrome_df.Rdata')
-
-rescale0100 <- function(x){round(((x-min(x))/(max(x)-min(x)))*100,3)}
-
-ref_pca_df <- pyrome_df %>% 
-  group_by(cell_hist) %>% 
-  summarise(ref_pca1 = mean(rescale0100(pca1)),
-            ref_pca2 = mean(rescale0100(pca2)))
-
-fut_pca_df <- pyrome_df %>% 
-  group_by(cell_2C) %>% 
-  summarise(fut_pca1 = mean(rescale0100(pca1)),
-            fut_pca2 = mean(rescale0100(pca2)))
-
-forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
-
-forest_pca_df <- full_join(forest_pyrome_df, ref_pca_df)
-forest_pca_df <- full_join(forest_pca_df, fut_pca_df)
-
-forest_pca_df <- forest_pca_df %>% 
-  mutate(pca1_diff = fut_pca1-ref_pca1,
-         pca2_diff = fut_pca2-ref_pca2) 
-
-forest_pca_df <- forest_pca_df %>% 
-  filter(!is.na(ref_pca1)) 
-
-forest_pca_sf <- sf::st_as_sf(forest_pca_df, coords = c('x', 'y'), crs = 4326) 
-mast_rast <- raster::raster('data/process/mast_rast.tif')
-
-list('ref_pca1','ref_pca2','fut_pca1','fut_pca2','pca1_diff','pca2_diff') %>%  
-  walk(function(x) {
-    print(paste0('Rasterizing ',x,'...'))
-    r <- terra::rasterize(forest_pca_sf, mast_rast, 
-                          field = x, fun = mean, na.rm = T)
-    print(paste0('Writing data/emd/',x,'.tiff'))
-    raster::writeRaster(r, filename = paste0('data/emd/',x,'.tiff'), overwrite = T)
-    return(r)
-  }) 
-
-
-
-r <- terra::rasterize(forest_pca_sf, mast_rast, field = 'mode_regime', fun = modal, na.rm = T)
-
-writeRaster(r, filename = paste0('data/emd/regime_pca','.tiff'), overwrite = T)
-
-saveRDS(pyrome_pca_df, 'data/process/pyrome_df.Rdata')
-
-#-------------------------------------------------------------------------------
-
-cell_pairs <- forest_pyrome_df %>% 
-  group_by(cell_hist, cell_2C) %>% 
-  tally() %>% 
-  filter(n > 1000)
-
-regime_change_df <- full_join(cell_pairs, ref_pca_df)
-
-regime_change_df <- full_join(regime_change_df, fut_pca_df) 
-
-regime_change_df <- regime_change_df %>% 
-  filter(!is.na(ref_sev), !is.na(ref_freq), !is.na(fut_sev), !is.na(fut_freq))
-
-ggplot(regime_change_df) +
-  geom_segment(aes(x = ref_sev, xend = fut_sev, y = ref_freq, yend = fut_freq), 
-               arrow = arrow(length = unit(0.2,"cm")),
-               alpha = 0.5) +
-  xlim(c(-1,1)) + ylim(c(-1,1))
-
-pyrome_pca_df <- pyrome_pca_df %>% 
-  mutate(regime = case_when(pca1 < 0 & pca2 < 0 ~ 1, #'Severe-Inrequent',
-                            pca1 < 0 & pca2 > 0 ~ 2, #'Severe-Frequent',
-                            pca1 > 0 & pca2 > 0 ~ 3, #'Insevere-Frequent',
-                            pca1 > 0 & pca2 < 0 ~ 4)) #'Insevere-Infrequent'))
-
-Mode <- function(x) {
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
-}
-
-regimes <- pyrome_pca_df %>% 
-  group_by(regime) %>% 
-  summarise(across(c(cbi,ndvi,fri,frs), mean))
-
-hist(regimes$mode_regime)
-
-
-# WRITE OUT --------------------------------------------------------------------
-forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
-
-forest_pca_df <- full_join(forest_pyrome_df, regimes)
-
-forest_pca_sf <- sf::st_as_sf(forest_pca_df, coords = c('x', 'y'), crs = 4326) 
-
-mast_rast <- raster('data/process/mast_rast.tif')
-
-r <- terra::rasterize(forest_pca_sf, mast_rast, field = 'mode_regime', fun = modal, na.rm = T)
-
-writeRaster(r, filename = paste0('data/emd/regime_pca','.tiff'), overwrite = T)
 
 
 
 
-# ------------------------------ Experimenting
-test_df <- as_tibble(pyrome_df) %>% 
-  select(cell_hist, cell_2C, cbi, ndvi, fri, frs) 
-
-# Euclidean distance
-529 
-562
-
-ref_test <- test_df %>% 
-  filter(cell_hist == 529) %>% 
-  select(cbi, ndvi, fri, frs) %>% 
-  slice_head(n = 1)
-
-fut_test <- test_df %>% 
-  filter(cell_hist == 529) %>% 
-  summarise(across(everything(), mean)) %>% 
-  select(cbi, ndvi, fri, frs)
-
-dist(rbind(ref_test, fut_test))
-
-# MAP ---------------------------------------------------------------------------
-boundary <- read_sf("C:\\Users\\hoecker\\Work\\GIS\\cb_2018_us_state_20m\\cb_2018_us_state_20m.shp") %>%
-  st_transform(., crs = 4326)
-
-plot_df <- pyrome_df %>% 
-  slice_sample(n = 2000)
-
-plot_sf <- st_as_sf(plot_df, coords = c('x', 'y'), crs = 4326)
-
-tm_shape(boundary, bbox = pyrome_sf) +
-  tm_borders() +
-  tm_fill(col = 'grey10') +
-  tm_shape(plot_sf) +
-  tm_dots(title = 'Fire regime',
-          col = 'regime',
-          size = 0.03,
-          #palette = c('#8c510a','#f6e8c3','#01665e'),
-          #style = 'cont',
-          shape = 15) +
-  tm_layout(legend.outside = TRUE)
 

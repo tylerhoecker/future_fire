@@ -1,3 +1,8 @@
+# Divides climate space of forest into a tessellation of hexagons
+# Calculates fire rotation period (FRP) for each climate bin
+# Calculate number of unique fires and other info per bin
+# Saves data for next step
+
 library(tidyverse)
 library(sf)
 library(hexbin)
@@ -43,10 +48,6 @@ hex_custom <- function(x, y){
 # Create for forest... just for plotting
 hexdf_forest <- hex_custom(forest_clim_df$def_hist, forest_clim_df$aet_hist)[['hex_df']]
 
-# Delete...
-# Create for nw forest 
-#hexdf_nw <- hex_custom(nw_clim_df$def_hist, nw_clim_df$aet_hist)[['hex_df']] 
-
 # Same for the burned points
 hexdf_burned <-  hex_custom(pyroclimate_input_df$def_hist, pyroclimate_input_df$aet_hist)[['hex_df']] 
 
@@ -75,20 +76,6 @@ pyrome_df <- pyrome_df %>%
   # Some climate bins are poorly represented... remove these 
   # filter(sample_n >= sample_min) 
   filter(fires >= min_fires)
-
-# This is not really used anymore ----------------------------------------------
-# Define forest vs non-forest using historical climate space of forest
-# Mark 2C bins that are outside of forest climate space
-# forest_hull <- forest_clim_df %>% 
-#   dplyr::select(def_hist, aet_hist) %>% 
-#   as.matrix() %>% 
-#   convhulln()
-# 
-# is_forest <- forest_clim_df %>% 
-#   dplyr::select(def_2C, aet_2C) %>% 
-#   as.matrix() %>%
-#   inhulln(forest_hull, .)
-# ------------------------------------------------------------------------------
 
 # Same procedure for all forested points 
 forest_pyrome_df <- forest_clim_df %>% 
@@ -136,14 +123,6 @@ hexdf_burned_n <- hexdf_burned %>%
   left_join(., n_fires, by = c('hexID' = 'cell_hist')) %>% 
   left_join(., unique_frp, by = c('hexID' = 'cell_hist')) %>% 
   left_join(., pyrome_bins, by = c('hexID' = 'cell_hist'))
-
-
-# # Save a raster of forest to non-forest transition
-# mast_rast <- raster('data/process/mast_rast.tif')
-# # Convert to spatial object (sf)
-# forest_pyrome_sf <- sf::st_as_sf(forest_pyrome_df, coords = c('x', 'y'), crs = 4326) 
-# r <- terra::rasterize(forest_pyrome_sf, mast_rast, field = 'forest', fun = modal, na.rm = T)
-# writeRaster(r, filename = paste0('data/emd/forest_','forest_trans','.tiff'), overwrite = T)
 
 # ------------------------------------------------------------------------------
 # Plot climate space that is represented by these various geographies 
@@ -288,79 +267,6 @@ tm_shape(boundary, bbox = pyrome_sf) +
 # Mysteriously starting throwing an error...
 # tmap_save(filename = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/climate_map_egpts.png',
 #           width = 6, height = 10, dpi = 500)
-
-# Trying out total forested area burned under reference and future...
-# ------------------------------------------------------------------------------
-is_for_ref <- pyrome_df %>% 
-  dplyr::select(def_hist, aet_hist) %>% 
-  as.matrix() %>%
-  inhulln(forest_hull, .)
-
-is_for_fut <- pyrome_df %>% 
-  dplyr::select(def_2C, aet_2C) %>% 
-  as.matrix() %>%
-  inhulln(forest_hull, .)
-
-for_burn_df <- pyrome_df %>% 
-  mutate(for_ref = is_for_ref,
-         for_fut = is_for_fut) %>% 
-  mutate(sev_cat = case_when(cbi <= 1 ~ 'Low',
-                             cbi > 1 & cbi <= 2 ~ 'Moderate',
-                             cbi > 2 & cbi <= 2.5 ~ 'High',
-                             cbi > 2.5 ~ 'Very high')) 
-
-
-reference_total <- for_burn_df %>% 
-  summarise(sev_cat = 'Any',
-            n_cells = n(),
-            ha = (n_cells * (30*30) * 0.0001), # 20 assumes 5% of Sean's data!!
-            km2 = ha*0.01,
-            time = 'Reference')
-
-reference_stats <- for_burn_df %>% 
-  group_by(sev_cat) %>% 
-  summarise(n_cells = n(),
-            ha = (n_cells * (30*30) * 0.0001),
-            km2 = ha*0.01,
-            time = 'Reference') %>% 
-  full_join(., reference_total)
-
-
-future_total <- for_burn_df[is_for_fut,] %>%  # Here I filter with this index of future forest
-  filter(cell_hist %in% pyrome_df$cell_2C) %>% 
-  summarise(sev_cat = 'Any',
-            n_cells = n(),
-            ha = (n_cells * (30*30) * 0.0001),
-            km2 = ha*0.01,
-            time = 'Future')
-
-future_stats <- for_burn_df[is_for_fut,] %>%  
-  filter(cell_hist %in% pyrome_df$cell_2C) %>% 
-  group_by(sev_cat) %>% 
-  summarise(n_cells = n(),
-            ha = (n_cells * (30*30) * 0.0001),
-            km2 = ha*0.01,
-            time = 'Future') %>% 
-  full_join(., future_total)
-
-for_burned_stats <- rbind(reference_stats, future_stats) %>% 
-  mutate(sev_cat = factor(sev_cat, levels = c('Any','Low','Moderate','High','Very high')))
-for_burned_stats
-
-burn_change_stats <- cbind(reference_stats[,c(1)],
-                           as.matrix(future_stats[,c(-1,-5)]) - as.matrix(reference_stats[,c(-1,-5)])) %>% 
-  mutate(sev_cat = factor(sev_cat, levels = c('Any','Low','Moderate','High','Very high')))
-burn_change_stats
-
-ggplot(for_burned_stats, aes(x = sev_cat, y = km2/1000*20)) +
-  geom_col(aes(fill = time), position = 'dodge')
-
-ggplot(burn_change_stats, aes(x = sev_cat, y = km2/1000*20)) +
-  geom_col(aes(fill = sev_cat), position = 'dodge')
-
-# ------------------------------------------------------------------------------
-
-
 
 # ------------------------------------------------------------------------------
 # Plotting the 'pyrome' space
