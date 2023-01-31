@@ -115,7 +115,7 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
       set_names('ref','fut') %>%
       map(function(df){
         df %>%
-          dplyr::select(pca1, pca2) %>% #z_cbi, z_ndvi, z_log_fri
+          dplyr::select(pca1, pca2) %>% 
           infer::rep_slice_sample(n = 500, reps = n_reps) %>%
           group_map(~rep_prep(.x))
       })
@@ -134,7 +134,7 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
              multi_emd_90 = quantile(rep_emds, 0.90, na.rm = T),
              cbi_dir  = (mean(fut_df$cbi) - mean(ref_df$cbi))/mean(ref_df$cbi),
              ndvi_dir = (mean(fut_df$ndvi) - mean(ref_df$ndvi))/mean(ref_df$ndvi),
-             frp_dir  = mean(exp(fut_df$log_frp_cell)) - mean(exp(ref_df$log_frp_cell)),
+             frp_dir  = mean(exp(fut_df$log_frp_pt)) - mean(exp(ref_df$log_frp_pt)),
              pca1_dir = mean(rescale01(fut_df$pca1)) - mean(rescale01(ref_df$pca1)),
              pca2_dir = mean(rescale01(fut_df$pca2)) - mean(rescale01(ref_df$pca2)),
              case = 4) # 4 = "TYPICAL" CASE - observations of fire in reference and future
@@ -148,7 +148,7 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
 plan(multisession, workers = 15)
 
 # Start timer
-tic()
+#tic()
 # There are 40 chunks... run the function over all pairs in all chunks
 emd_chunk_df <- c(1:40) %>%  #40
   map_df(function(x){
@@ -163,20 +163,20 @@ emd_chunk_df <- c(1:40) %>%  #40
     return(emd_df)
   })
 # Stop timer
-toc()
+#toc()
 
 plan(sequential)
 
 # Read/combine the saved chunks
-emd_chunk_df <- c(1:40) %>%
-  map_df(function(x){
-    print(paste0('Reading chunk ', x))
-    emd_df <- readRDS(paste0('data/process/complete/emd_df_',x,'.Rdata'))
-    return(emd_df)
-  })
-
-saveRDS(emd_chunk_df, 'data/emd/emd_2022_09_28.Rdata')
-emd_chunk_df <- readRDS('data/emd/emd_2022_09_21.Rdata')
+# emd_chunk_df <- c(1:40) %>%
+#   map_df(function(x){
+#     print(paste0('Reading chunk ', x))
+#     emd_df <- readRDS(paste0('data/process/complete/emd_df_',x,'.Rdata'))
+#     return(emd_df)
+#   })
+# 
+saveRDS(emd_chunk_df, 'data/emd/emd_2023_01_30.Rdata')
+#emd_chunk_df <- readRDS('data/emd/emd_2023_01_25.Rdata')
 
 # ------------------------------------------------------------------------------
 # Temp. additions until can add above - update cases to ID dry vs wet
@@ -191,6 +191,7 @@ emd_chunk_df <- readRDS('data/emd/emd_2022_09_21.Rdata')
 # ------------------------------------------------------------------------------
 library(terra)
 library(raster)
+library(sf)
 
 # Read in the master grid as raster!
 mast_rast <- raster('data/process/mast_rast.tif')
@@ -211,22 +212,11 @@ pyrome_emd_sf <- sf::st_as_sf(pyrome_emd_df, coords = c('x', 'y'), crs = 4326)
 #              append = FALSE)
 
 # Rasterize and write out the TIFFs
-
-list('multi_emd_50','cbi_dir','ndvi_dir','frp_dir','pca1_dir','pca2_dir') %>%  
+list('multi_emd_50','cbi_dir','ndvi_dir','frp_dir','pca1_dir','pca2_dir','case') %>%  
   walk(function(x) {
     print(paste0('Rasterizing ',x,'...'))
     r <- terra::rasterize(pyrome_emd_sf, mast_rast, 
                           field = x, fun = mean, na.rm = T)
-    print(paste0('Writing data/emd/',x,'.tiff'))
-    writeRaster(r, filename = paste0('data/emd/forest_',x,'.tiff'), overwrite = T)
-    return(r)
-  }) 
-
-list('case', 'loss_case') %>%  
-  walk(function(x) {
-    print(paste0('Rasterizing ',x,'...'))
-    r <- terra::rasterize(pyrome_emd_sf, mast_rast, 
-                          field = x, fun = modal, na.rm = T)
     print(paste0('Writing data/emd/',x,'.tiff'))
     writeRaster(r, filename = paste0('data/emd/forest_',x,'.tiff'), overwrite = T)
     return(r)
@@ -238,7 +228,7 @@ list('case', 'loss_case') %>%
 library(sf)
 # Join to dataframe of reference and future climate bins for all forested cells
 forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
-emd_df <- readRDS('data/emd/emd_2022_09_28.Rdata')
+emd_df <- emd_chunk_df #readRDS('data/emd/emd_2023_01_25.Rdata')
 
 length(distinct(emd_df, cell_hist, cell_2C)$cell_hist)
 
@@ -258,12 +248,9 @@ firesheds_emd_sf <- st_join(forest_emd_sf, firesheds_sf, join = st_within) %>%
   summarize(adapt_dist = mean(multi_emd_50),
             units = n()) %>% 
   st_drop_geometry() %>% 
-  filter(units > 100)
-
-firesheds_emd_sf <- firesheds_emd_sf %>% 
   filter(units > 500)
 
-# This is a bit weird but meant to preseve multipolygon geometry which gets mixed up otherwise
+# This is a bit weird but preserves multipolygon geometry which gets mixed up otherwise
 firesheds_emd_poly <- firesheds_sf %>% 
   filter(Fireshed_I %in% firesheds_emd_sf$Fireshed_I) %>% 
   left_join(., firesheds_emd_sf)
@@ -286,11 +273,11 @@ firesheds_emd_frs_sf <- firesheds_emd_poly %>%
   mutate(frs = firesheds_frs$frs_spatial,
          cat1 = case_when(adapt_dist <= quantile(firesheds_emd_poly$adapt_dist, 0.33) ~ 'A',
                           adapt_dist > quantile(firesheds_emd_poly$adapt_dist, 0.33) & 
-                            adapt_dist <= quantile(firesheds_emd_poly$adapt_dist, 0.66) ~ 'B',
+                          adapt_dist <= quantile(firesheds_emd_poly$adapt_dist, 0.66) ~ 'B',
                           adapt_dist > quantile(firesheds_emd_poly$adapt_dist, 0.66) ~ 'C'),
          cat2 = case_when(frs <= quantile(firesheds_frs$frs_spatial, 0.33) ~ '3',
                           frs > quantile(firesheds_frs$frs_spatial, 0.33) & 
-                            frs <= quantile(firesheds_frs$frs_spatial, 0.66) ~ '2',
+                          frs <= quantile(firesheds_frs$frs_spatial, 0.66) ~ '2',
                           frs > quantile(firesheds_frs$frs_spatial, 0.66) ~ '1')) %>% 
   unite('bicat', cat1, cat2) %>% 
   dplyr::select(Area_HA, Fireshed_I, Fireshed_N, adapt_dist, frs, bicat)

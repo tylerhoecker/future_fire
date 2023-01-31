@@ -223,8 +223,8 @@ forest_type_1 <-
    slice_sample(n = 1) 
  
  ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
-   geom_vline(aes(xintercept = 0.8)) +
-   geom_vline(aes(xintercept = 1.02)) +
+   geom_vline(aes(xintercept = 0.36)) + 
+   geom_vline(aes(xintercept = 0.55)) +
    geom_hline(aes(yintercept = 0.41)) +
    geom_hline(aes(yintercept = 0.51)) +
    geom_point(aes(fill = tree_group), 
@@ -234,10 +234,12 @@ forest_type_1 <-
                     alpha = 0.9, min.segment.length = 0.1, size = 3, show.legend = FALSE) +
    scale_fill_brewer('Forest type', palette = 'Dark2', guide = 'none') +
    scale_y_reverse() +
+   coord_cartesian(xlim = c(0,1.25)) +
+   scale_x_continuous(breaks = seq(0,1.25,0.5)) +
    labs(x = 'Pyroclimate exposure', y = 'Fire resistance') +
    theme_bw(base_size = 12) 
 
- ggsave('bivar_scatter_type.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
+ ggsave('Figure_5_scatter_foresttype.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Main_Figs/',
         height = 5, width = 5.5, dpi = 600)
  
 

@@ -11,6 +11,10 @@ library(tidyverse)
 library(raster)
 library(terra)
 library(sf)
+select <- dplyr::select
+# ------------------------------------------------------------------------------
+# Stop: Skip to line XXX to use dataset already created and save time!
+# ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
 # Use dataframe which includes CBI and NDVI as the sample
@@ -35,39 +39,34 @@ fire_veg_df <- fire_veg_df_full %>%
 # Make dataframe spatial first with coordinates
 fire_veg_sf <- st_as_sf(fire_veg_df, coords = c('x', 'y'), crs = 4326)
 
+
+
 # ------------------------------------------------------------------------------
-# Create master grid (Stevens et al. fire-resistance traits product)
+# Create master grid 
 # ------------------------------------------------------------------------------
 # Stevens et al. FRS gridded dataset has the most constrained extent, so use
 # this to create a master grid for masking out proceeding layers
-# This produces a course version of the Stevens layer 
-# Done -------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Extract fire resistance scores
-# ------------------------------------------------------------------------------
-frs_rast <- rast('data/composition/frs_spatial.tif')
-frs_rast <- terra::project(frs_rast, y = "epsg:4326")
-
-mast_rast <- terra::aggregate(frs_rast,
-                              fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
-                              fun = 'modal', na.rm = T) %>%
-  classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE))
-
-writeRaster(mast_rast, 'data/process/mast_rast.tif', overwrite=T)
-# ------------------------------------------------------------------------------
+# This produces a coarser version of the Stevens layer 
+# frs_rast <- rast('data/composition/frs_spatial.tif')
+# frs_rast <- terra::project(frs_rast, y = "epsg:4326")
+# mast_rast <- terra::aggregate(frs_rast,
+#                               fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
+#                               fun = 'modal', na.rm = T) %>%
+#   classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE))
+# 
+# writeRaster(mast_rast, 'data/process/mast_rast.tif', overwrite=T)
 mast_rast <- rast('data/process/mast_rast.tif')
-# ------------------------------------------------------------------------------
-
-
 # ------------------------------------------------------------------------------
 # Filter out fire-veg points that fall outside this more restrictive definition 
 # of conifer-dominated forest. 
+# ------------------------------------------------------------------------------
 fire_veg_is_forest <- terra::extract(mast_rast, st_coordinates(fire_veg_sf))
 
 fire_veg_sf <- fire_veg_sf %>% 
   mutate(is_forest = fire_veg_is_forest$frs_spatial) %>% 
   filter(!is.na(is_forest))
 
+# Save as a non-spatial dataframe, to add additional variables to
 fire_veg_df <- fire_veg_sf %>% 
   st_drop_geometry() %>% 
   cbind(st_coordinates(fire_veg_sf))
@@ -86,14 +85,7 @@ climate_stack <- list.files('data/terraclimate/', full.names = T) %>%
 # Extract values from climate rasters
 climate_fire_pts <- terra::extract(climate_stack, st_coordinates(fire_veg_sf))
 
-# C-Bind to the fire-veg dataframe... 
-pyroclimate_input_df <- cbind(fire_veg_df, climate_fire_pts) %>% 
-  # Probably due to reprojection etc, 5 points from CA land outside the climate raster
-  filter(aet_hist > 0)
-saveRDS(pyroclimate_input_df, 'data/process/pyroclimate_input_df.Rdata')
-
-# All forest points
-# Get centroids
+# Get centroids of all forest points
 forest_pts_sp <- as.points(mast_rast)
 # Extract climate data
 forest_climate <- terra::extract(climate_stack, forest_pts_sp, xy = TRUE) 
@@ -101,9 +93,8 @@ forest_climate <- terra::extract(climate_stack, forest_pts_sp, xy = TRUE)
 # ------------------------------------------------------------------------------
 # Calculate fire rotation period
 # ------------------------------------------------------------------------------
-# Done -------------------------------------------------------------------------
-# Read in a rasterized version of MTBS data. Pre-processing in QGIS, based on this
-# thread: https://gis.stackexchange.com/questions/297274/create-raster-out-of-overlapping-buffers-within-the-same-shapefile-in-qgis-3-0
+# Read in a rasterized version of MTBS data. 
+# Pre-processing in QGIS, based on this thread: https://gis.stackexchange.com/questions/297274/create-raster-out-of-overlapping-buffers-within-the-same-shapefile-in-qgis-3-0
 # - Identify portions of polygons that overlap (aka reburns)
 # - Rasterize to mast_rast grid
 # - Mask out areas of non-forest (rasterize just matches grid)
@@ -113,27 +104,77 @@ reburn_rast <- classify(reburn_rast, cbind(NA, 0))
 # Mask out non-forest (change those areas back to NA)
 reburn_rast <- mask(reburn_rast, mast_rast)
 
-# Record whether forest points burned or not
-forest_burned <- terra::extract(reburn_rast, forest_pts_sp)
+# Aggregate to a 13.6 km grid (1/8th degree in both directions)
+# This will take a "mean" of the number of times each small cell burned.
+# This is equivalent to the proportion of the larger cell that burned.
+reburn_frp_grid <- terra::aggregate(reburn_rast,
+                                    fact = c((1/8)/xres(reburn_rast),
+                                             (1/8)/yres(reburn_rast)),
+                                    fun = mean, na.rm = T)
 
-# Calculate the area of each cell (its a lat/long grid so area varies)
-forest_cell_area <- cellSize(reburn_rast)
-forest_area_df <- terra::extract(forest_cell_area, forest_pts_sp)
+reburn_fire_pts <- terra::extract(reburn_frp_grid, st_coordinates(fire_veg_sf))
 
-# Gut check on these values against Abatzoglous et al. observed data: https://datadryad.org/stash/landing/show?id=doi%3A10.6071%2FM3WQ1R
-sum(forest_burned$forest_reburns*forest_area_df$area)*0.000001
-sum(read_csv('data/forest/abatzoglou_comparison.csv')$area)
-# Wow! That is crazy close! Good.
+# Aggregate the mast_rast grid (indicating forested area) to 1/8th degree grid,
+# indicating proportion of coarse grid that is forested.
+forest_frp_grid <-  mast_rast %>%
+  classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE)) %>%
+  classify(., cbind(NA, 0)) %>%
+  terra::aggregate(.,
+                   fact = c((1/8)/xres(reburn_rast),
+                            (1/8)/yres(reburn_rast)),
+                   fun = mean, na.rm = T)
+
+forest_prop_fire_pts <- terra::extract(forest_frp_grid, st_coordinates(fire_veg_sf))
+
+
+# Produce a dataframe with FRP values for all pyroclimate points
+frp_df <- 
+  tibble('prop_burn' = reburn_fire_pts$forest_reburns,
+         'prop_forest' = forest_prop_fire_pts$frs_spatial) %>% 
+  mutate(prop_for_burn = (prop_burn*prop_forest),
+         prop_for_burn = ifelse(prop_for_burn < 0.036, runif(1,0.036,0.72), prop_for_burn),
+         frp_pt = (36 / prop_for_burn),
+         log_frp_pt = log(frp_pt))
+
+# Gut check these values against Abatzoglous et al. observed data for same time period 
+# I removed everything except 1984-2019!
+# https://datadryad.org/stash/landing/show?id=doi%3A10.6071%2FM3WQ1R
+forest_area_burned <- (reburn_frp_grid*forest_frp_grid)*(cellSize(reburn_frp_grid)*0.000001)
+analog_estimate <- global(forest_area_burned, 'sum', na.rm = T)
+abatzoglou_estimate <- read_csv('data/forest/abatzoglou_comparison.csv') %>% 
+     dplyr::select(area) %>% 
+     sum()
+
+abatzoglou_estimate/36
+analog_estimate/36
+abatzoglou_estimate-analog_estimate  
+# Difference of 777.2 ha - that's very close, 0.6% lower!
+
+# Write a raster of estimated FRPs based on this method
+prop_burn <- forest_frp_grid*reburn_frp_grid
+m <- c(0, 0.036, 0.036)
+rclmat <- matrix(m, ncol=3, byrow=TRUE)
+prop_burn <- classify(prop_burn, rclmat, include.lowest=TRUE)
+frp_grid <- 36/prop_burn
+frp_grid <- mask(frp_grid, mast_rast)
+
+writeRaster(frp_grid, 'data/process/frp_grid_yrs_1-8.tiff', overwrite=TRUE)
+
+# ------------------------------------------------------------------------------
+# Combine things into one dataframe
+# ------------------------------------------------------------------------------
+pyroclimate_input_df <- cbind(fire_veg_df, climate_fire_pts, frp_df) %>% 
+  # Probably due to reprojection, 5 points from CA land outside the climate raster
+  filter(aet_hist > 0)
+saveRDS(pyroclimate_input_df, 'data/process/pyroclimate_input_df.Rdata')
 
 # Transform to dataframe and filter out non-forest cells, unrealistic AET vals
 forest_clim_df <- forest_pts_sp %>% 
   as.data.frame() %>% 
   as_tibble() %>% 
-  # Combine with climate data extracted for each point
   cbind(forest_climate,
-        ., 
-        'burned' = forest_burned$forest_reburns, 
-        'area' = forest_area_df$area) %>% 
+        .) %>% 
+  as_tibble() %>% 
   # Leftover layer name from creating the mast_rast from Jen's FRS product
   dplyr::select(-frs_spatial) %>% 
   # Probably due to reprojection etc., a small number of points fall just off the climate grid, removing them
@@ -143,6 +184,7 @@ saveRDS(forest_clim_df, 'data/process/forest_clim_df.Rdata')
 # ------------------------------------------------------------------------------
 forest_clim_df <- readRDS('data/process/forest_clim_df.Rdata')
 # ------------------------------------------------------------------------------
+
 
 # ------------------------------------------------------------------------------
 # Some checks

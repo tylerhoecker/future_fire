@@ -2,7 +2,7 @@
 # It creates subsets of data that are called upon during a parallel processing step
 
 library(tidyverse)
-
+library(furrr)
 # ------------------------------------------------------------------------------
 # Rescale pyroclimate dimensions, 
 # ------------------------------------------------------------------------------
@@ -19,14 +19,14 @@ cell_pairs <- forest_pyrome_df %>%
   distinct() %>% 
   split(seq(nrow(.)))
 
+# Add columns for all variables that are rescaled from 0-100
 rescale_pyrome_df <- pyrome_df %>% 
-  dplyr::select(cell_hist, cell_2C, cbi, ndvi, log_frp_cell, pca1, pca2) %>% 
-  mutate(across(c(cbi, ndvi, log_frp_cell, pca1, pca2), ~ rescale0100(.x), .names = 'z_{.col}'))
+  dplyr::select(cell_hist, cell_2C, cbi, ndvi, log_frp_pt, pca1, pca2) %>% 
+  mutate(across(c(cbi, ndvi, log_frp_pt, pca1, pca2), ~ rescale0100(.x), .names = 'z_{.col}'))
 
 # ------------------------------------------------------------------------------
 # Create and save chunks of data to optimize parallel processing 
 # ------------------------------------------------------------------------------
-# Add columns for all variables that are rescaled from 0-100
 ref_df_list <- cell_pairs %>% 
   map(function(pair){
     df <- filter(rescale_pyrome_df, cell_hist == pair[['cell_hist']]) 
