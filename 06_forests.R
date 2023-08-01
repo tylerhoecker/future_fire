@@ -1,6 +1,11 @@
-# This step relates exposure results to forest composition, using FIA data
+# ------------------------------------------------------------------------------
+# Description: This step relates exposure results to forest composition, using FIA data
 # Calculate dominate species in each fireshed and pairs with exposure
+# ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# Load packages
+# ------------------------------------------------------------------------------
 library(tidyverse)
 library(sf)
 library(terra)
@@ -96,15 +101,15 @@ treemap_key <- read_csv('data/composition/TL_CN_Lookup.txt') %>%
 
 
 # Do this process again but summarize by tree group, to see if that changes anything
-fireshed_treegroup_df <- split(vect(firesheds), 'Fireshed_I') %>% 
+fireshed_treegroup_df <- split(vect(firesheds), 'Frshd_I') %>% 
   map_dfr(function(fireshed){
     
-    print(paste('Running fireshed', fireshed$Fireshed_I, fireshed$Fireshed_N))
+    print(paste('Running fireshed', fireshed$Frshd_I, fireshed$Frshd_N))
     
     # Extract TreeMap values within fireshed polygon
     treemap_fs <- terra::crop(treemap, fireshed)
     tree_sheds <- terra::extract(treemap_fs, fireshed)
-    tree_sheds$ID <- fireshed$Fireshed_I
+    tree_sheds$ID <- fireshed$Frshd_I
     
     # Now summarize FIA data associated with this fireshed
     modal_dominant <- tree_sheds %>% 
@@ -142,22 +147,22 @@ fireshed_treegroup_df <- split(vect(firesheds), 'Fireshed_I') %>%
     return(result)
   })
 
-
-fireshed_treegroup_df 
+saveRDS(fireshed_treegroup_df, 'data/process/fireshed_treegroup_df.Rds') 
 
 fireshed_df <- firesheds %>% 
   st_drop_geometry() %>% 
-  full_join(., fireshed_treegroup_df, by = c('Fireshed_I'='ID')) %>% 
+  full_join(., fireshed_treegroup_df, by = c('Frshd_I'='ID')) %>% 
   rename(tree_group = majority_basal) %>% 
   filter(tree_group != 'Aspen') %>% 
   mutate(tree_group = fct_relevel(as.factor(tree_group), 
-                                  levels = c('Douglas-fir',
+                                  c('Douglas-fir',
                                              'Ponderosa pine',
                                              'Junipers and Pinyon pines',
                                              'Lodgepole pine',
                                              'True firs',
                                              'Engelmann spruce',
                                              'Redwood'))) 
+
 
 # fireshed_df %>% 
 #   group_by(bicat, tree_group) %>% 
@@ -166,11 +171,12 @@ fireshed_df <- firesheds %>%
 #   View()
 
 forest_type_egs <- fireshed_df %>% 
-  filter(Fireshed_I %in% c(633, 1326, 1983, 21, 822, 1915, 260, 164, 102, 462,
+  filter(Frshd_I %in% c(633, 1326, 1983, 21, 822, 1915, 260, 164, 102, 462,
                            524, 759, 1228, 1057, 1186, 1763, 2140, 1622))
 
+
 # Colored by bivariate group
-ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
+ggplot(fireshed_df, aes(x = adpt_ds, y = frs)) +
   # geom_vline(aes(xintercept = 15)) +
   # geom_vline(aes(xintercept = 20)) +
   # geom_hline(aes(yintercept = 0.38)) +
@@ -180,7 +186,7 @@ ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
   geom_point(aes(fill = bicat), color = 'black', shape = 21, size = 2) +
   geom_label_repel(data = forest_type_egs,
                    aes(label = tree_group, fill = bicat),
-                   alpha = 0.9, min.segment.length = 0.1, size = 3) +
+                   alpha = 0.9, min.segment.length = 0.1, size = 6) +
   scale_fill_manual(values = c('A_1'='#e8e8e8','A_2'='#cbb8d7','A_3'='#9972af',
                                'B_1'='#e4d9ac','B_2'='#c8ada0','B_3'='#976b82',
                                'C_1'='#c8b35a','C_2'='#af8e53','C_3'='#804d36'),
@@ -188,72 +194,84 @@ ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
   scale_y_reverse() +
   #coord_cartesian(xlim = c(5,23), ylim = c(0.65,0.3)) +
   labs(x = 'Pyroclimate exposure', y = 'Fire resistance') +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 26) +
   theme(rect = element_rect(fill = "transparent"))
  
- ggsave('fia_fireshed_bivar.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
-        height = 5, width = 5, dpi = 600)
+ggsave('fia_fireshed_bivar.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Poster_Figs/',
+        height = 8, width = 9, dpi = 600)
+ 
  
 
- ggplot(fireshed_df) +
-   geom_histogram(aes(x = tree_group, fill = bicat), stat="count", color = 'black') +
-   scale_fill_manual(values = c('A_1'='#aaaaaa','A_2'='#cbb8d7','A_3'='#9972af',
-                                'B_1'='#e4d9ac','B_2'='#c8ada0','B_3'='#976b82',
-                                'C_1'='#c8b35a','C_2'='#af8e53','C_3'='#804d36'),
-                     guide = 'none') +
-   theme_bw(base_size = 12) +
-   labs(x = 'Forest type', y = 'Number of firesheds') +
-   scale_y_continuous(expand = c(.01, 0)) +
-   theme(axis.text.y = element_text(color = 'black'),
-         axis.title.x = element_blank(),
-         axis.text.x = element_text(angle = 10, margin = margin(t = 6.5)),
-         axis.line = element_line(colour = "black"),
-         panel.grid = element_blank(),
-         panel.border = element_blank(),
-         panel.background = element_blank(),
-         rect = element_rect(fill = "transparent"))
- 
- ggsave('bivar_histogram.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
-        height = 7.5, width = 6.5, dpi = 600)
+ggplot(fireshed_df) +
+  geom_histogram(aes(x = tree_group, fill = bicat), stat="count", color = 'black') +
+  scale_fill_manual(values = c('A_1'='#aaaaaa','A_2'='#cbb8d7','A_3'='#9972af',
+                               'B_1'='#e4d9ac','B_2'='#c8ada0','B_3'='#976b82',
+                               'C_1'='#c8b35a','C_2'='#af8e53','C_3'='#804d36'),
+                    guide = 'none') +
+  theme_bw(base_size = 8) +
+  labs(x = 'Forest type', y = 'Number of firesheds') +
+  scale_y_continuous(expand = c(.01, 0)) +
+  theme(axis.text.y = element_text(color = 'black'),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 10, margin = margin(t = 6.5), color = 'black'),
+        axis.line = element_line(colour = "black"),
+        panel.grid = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        rect = element_rect(fill = "transparent"))
+
+ggsave('bivar_histogram.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs',
+       height = 5, width = 4, dpi = 600)
+
+
  
 # Colored by forest type
-forest_type_1 <- 
- forest_type_egs %>% 
-   group_by(tree_group) %>% 
-   slice_sample(n = 1) 
- 
- ggplot(fireshed_df, aes(x = adapt_dist, y = frs)) +
-   geom_vline(aes(xintercept = 0.36)) + 
-   geom_vline(aes(xintercept = 0.55)) +
-   geom_hline(aes(yintercept = 0.41)) +
-   geom_hline(aes(yintercept = 0.51)) +
-   geom_point(aes(fill = tree_group), 
-              alpha = 0.7, color = 'black', shape = 21, size = 2) +
-   geom_label_repel(data = forest_type_1,
-                    aes(label = tree_group, fill = tree_group),
-                    alpha = 0.9, min.segment.length = 0.1, size = 3, show.legend = FALSE) +
-   scale_fill_brewer('Forest type', palette = 'Dark2', guide = 'none') +
-   scale_y_reverse() +
-   coord_cartesian(xlim = c(0,1.25)) +
-   scale_x_continuous(breaks = seq(0,1.25,0.5)) +
-   labs(x = 'Pyroclimate exposure', y = 'Fire resistance') +
-   theme_bw(base_size = 12) 
 
- ggsave('Figure_5_scatter_foresttype.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Main_Figs/',
-        height = 5, width = 5.5, dpi = 600)
+# Forest type avgs
+type_avgs <- fireshed_df |> 
+  group_by(tree_group) |> 
+  summarise(adpt_ds = median(adpt_ds),
+            frs = median(frs)) 
  
+
+# forest_type_1 <- forest_type_egs %>% 
+#   group_by(tree_group) %>% 
+#   
+#slice_sample(n = 1) 
+ 
+ggplot(fireshed_df, aes(x = adpt_ds, y = frs)) +
+  geom_vline(aes(xintercept = quantile(adpt_ds, 0.33))) + 
+  geom_vline(aes(xintercept = quantile(adpt_ds, 0.66))) +
+  geom_hline(aes(yintercept = quantile(frs, 0.33))) +
+  geom_hline(aes(yintercept = quantile(frs, 0.66))) +
+  geom_point(aes(fill = tree_group), 
+             alpha = 0.7, color = 'black', shape = 21, size = 1) +
+  geom_point(data = type_avgs, size = 1.2) +
+  geom_label_repel(data = type_avgs,
+                   aes(label = tree_group, fill = tree_group),
+                   alpha = 0.9, min.segment.length = 0.1, size = 2.5, show.legend = FALSE) +
+  scale_fill_brewer('Forest type', palette = 'Dark2', guide = 'none') +
+  scale_y_reverse() +
+  coord_cartesian(xlim = c(quantile(fireshed_df$adpt_ds, 0.01),quantile(fireshed_df$adpt_ds, 0.99))) +
+  #scale_x_continuous(breaks = seq(0,1.25,0.5)) +
+  labs(x = 'Exposure', y = 'Fire resistance') +
+  theme_bw(base_size = 8) 
+
+ggsave('Figure_5_scatter_foresttype.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Main_Figs/',
+       height = 3, width = 3.14, dpi = 500)
+
 
 # Previous methods:
  # # Extract and summarize FIA data by fireshed
- # fireshed_sp_df <- split(vect(firesheds), 'Fireshed_I') %>% 
+ # fireshed_sp_df <- split(vect(firesheds), 'Frshd_I') %>% 
  #   map_dfr(function(fireshed){
  #     
- #     print(paste('Running fireshed', fireshed$Fireshed_I, fireshed$Fireshed_N))
+ #     print(paste('Running fireshed', fireshed$Frshd_I, fireshed$Frshd_N))
  #     
  #     # Extract TreeMap values within fireshed polygon
  #     treemap_fs <- terra::crop(treemap, fireshed)
  #     tree_sheds <- terra::extract(treemap_fs, fireshed)
- #     tree_sheds$ID <- fireshed$Fireshed_I
+ #     tree_sheds$ID <- fireshed$Frshd_I
  #     
  #     # Now summarize FIA data associated with this fireshed
  #     modal_dominant <- tree_sheds %>% 
@@ -294,7 +312,7 @@ forest_type_1 <-
  # fireshed_sp_df
  fireshed_sp_treegroup_df <- firesheds %>% 
    st_drop_geometry() %>% 
-   full_join(., fireshed_sp_df, by = c('Fireshed_I'='ID')) %>% 
+   full_join(., fireshed_sp_df, by = c('Frshd_I'='ID')) %>% 
    left_join(., spp_names, by = c('majority_basal'='sp')) %>% 
    filter(tree_group != 'Aspen') %>% 
    mutate(tree_group = fct_relevel(as.factor(tree_group), 
@@ -313,7 +331,7 @@ forest_type_1 <-
    View()
  
  forest_type_egs <- fireshed_sp_treegroup_df %>% 
-   filter(Fireshed_I %in% c(633, 1326, 1983, 21, 822, 1915, 260, 164, 102, 462,
+   filter(Frshd_I %in% c(633, 1326, 1983, 21, 822, 1915, 260, 164, 102, 462,
                             524, 759, 1228, 1057, 1186, 1763, 2140, 1622))
  
  fia_sp_basal <- fia_tree %>% 

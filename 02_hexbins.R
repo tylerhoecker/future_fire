@@ -1,12 +1,15 @@
-# Divides climate space of forest into a tessellation of hexagons
-# NOT ANY MORE ---------- Calculates fire rotation period (FRP) for each climate bin
-# Calculate number of unique fires and other info per bin
-# Saves data for next step
+# ------------------------------------------------------------------------------
+# Description: Divides climate space of forest into a tessellation of hexagons, 
+# with infomation about urn severity, productivity, fire occurrence, and climate 
+# summarized within each.
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# Load packages
+# ------------------------------------------------------------------------------
 library(tidyverse)
 library(sf)
 library(hexbin)
-library(tmap)
-library(geometry)
 
 # ------------------------------------------------------------------------------
 # Read in previously saved dataframe of fire, veg, climate dataframe
@@ -35,6 +38,10 @@ n_bins <- 30
 xrange <- range(c(forest_clim_df$def_hist,forest_clim_df$def_2C)) #,pyroclimate_input_df$def_hist,pyroclimate_input_df$def_2C
 yrange <- range(c(forest_clim_df$aet_hist,forest_clim_df$aet_2C)) # ,pyroclimate_input_df$aet_hist,pyroclimate_input_df$aet_2C
 
+# Size of bins in mm def
+(xrange[2]-xrange[1])/n_bins
+# Size of bins in mm aet
+(yrange[2]-yrange[1])/n_bins
 
 # Custom wrapper function to do this repeatedly, below
 hex_custom <- function(x, y){
@@ -82,32 +89,13 @@ unique_frp <- pyrome_df %>%
 # Same procedure for all forested points 
 forest_pyrome_df <- forest_clim_df %>% 
   mutate(cell_hist = hex_custom(def_hist, aet_hist)[['hex']]@cID,
-         cell_2C = hex_custom(def_2C, aet_2C)[['hex']]@cID) #%>%
-  # Not used anymore -----------------------------------------
-  # Identify whether or not points move groups between periods
-  # mutate(change = ifelse(cell_2C == cell_hist, 0, 1),
-  #        forest = as.numeric(is_forest)) %>% 
-  # ----------------------------------------------------------
-  # FIRE ROTATION PERIOD NOT ANYMORE -------------------------------------
-  # Calculate proportion of climate bins that burned
-  # group_by(cell_hist) %>% 
-  # mutate(area_burn = sum(burned*area),
-  #        area_total = sum(area),
-  #        prop_burn = area_burn/area_total,
-  #        prop_burn = ifelse(prop_burn < 0.036, runif(1,0.036,0.72), prop_burn),
-  #        frp_cell = 36/prop_burn,
-  #        log_frp_cell = log(frp_cell))
-
-# unique_frp <- forest_pyrome_df %>% 
-#   distinct(cell_hist,frp_cell,log_frp_cell)
+         cell_2C = hex_custom(def_2C, aet_2C)[['hex']]@cID) 
 
 saveRDS(forest_pyrome_df, 'data/process/forest_pyrome_df.Rdata')
-forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
-# Add this new FRP version to pyrome_df
-# pyrome_df <- left_join(pyrome_df, unique_frp) 
 
+pyrome_df <- left_join(pyrome_df, unique_frp)
 saveRDS(pyrome_df, 'data/process/pyrome_df.Rdata')
-pyrome_df <- readRDS('data/process/pyrome_df.Rdata')
+
 # Summarize NDVI and CBI by climate bin
 pyrome_bins <- pyrome_df %>% 
   group_by(cell_hist) %>% 
@@ -119,9 +107,7 @@ pyrome_bins <- pyrome_df %>%
 hexdf_burned_n <- hexdf_burned %>% 
   filter(hexID %in% pyrome_df$cell_hist) %>% 
   left_join(., pyrome_bins, by = c('hexID' = 'cell_hist')) %>% 
-  left_join(., n_fires, by = c('hexID' = 'cell_hist')) #%>% 
-  #left_join(., unique_frp, by = c('hexID' = 'cell_hist')) %>% 
-  #left_join(., pyrome_bins, by = c('hexID' = 'cell_hist'))
+  left_join(., n_fires, by = c('hexID' = 'cell_hist')) 
 
 # ------------------------------------------------------------------------------
 # Plot climate space that is represented by these various geographies 
@@ -137,13 +123,13 @@ eg_data <- pyrome_df %>%
 ggplot() +
   geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
   geom_hex(data = hexdf_forest, aes(x = x, y = y),
-           color = 'grey50', fill = '#585858', stat = 'identity') +
+           color = 'grey50', fill = '#585858', stat = 'identity', size = .1) +
   geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'grey50', fill = '#ff0000', stat = 'identity') + #alpha = 0.7,
+           color = 'grey50', fill = '#ff0000', stat = 'identity', size = .1) + #alpha = 0.7,
   # geom_hex(data = hexdf_burned, aes(x = x, y = y, fill = test529),
   #          color = 'black', alpha = 1, stat = 'identity') +
   geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = fires),
-           color = 'black', stat = 'identity') +
+           size = .1, color = 'black', stat = 'identity') +
   #geom_text(data = hexdf_burned_n, aes(x = x, y = y)) +
   # geom_hex(data = hexdf_nw, aes(x = x, y = y),
   #          color = 'darkgreen', fill = 'transparent', alpha = 0.3, stat = 'identity') +
@@ -152,21 +138,22 @@ ggplot() +
   geom_curve(data = eg_data,
                aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
                arrow = arrow(length=unit(0.15,"cm")), 
-             color = 'white', curvature = -0.5, size = 0.7) +
+             color = 'white', curvature = -0.5, size = 0.4) +
   # ggrepel::geom_label_repel(data = eg_data, aes(x = def_hist, y = aet_hist, label = region), 
   #                           size = 2, box.padding = 0.05) +
   scale_fill_gradient('Fires observed', low = '#d70000', high = '#4c0000',
-                      limits = c(0,150), breaks = c(10,50,100,150)) +
+                      limits = c(0,150)) +
   # scale_fill_gradient2('Climate Hexbin',
   #                      low = '#8c510a', mid = '#f6e8c3', high = '#01665e',
   #                      midpoint = 500) +
   labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
-  theme_bw(base_size = 14) +
-  theme(legend.position = c(0.86,0.82),
-        legend.background = element_blank())
+  theme_bw(base_size = 8) +
+  theme(legend.position = 'none',
+        legend.background = element_blank(),
+        axis.text = element_text(color = 'black'))
 
 ggsave('climate_hex_burned.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs/',
-       height = 6, width = 7, dpi = 500)
+       height = 3.1, width = 3.1, dpi = 500)
 
 # ------------------------------------------------------------------------------
 # Plot NDVI, CBI and FRP in climate space
@@ -177,19 +164,23 @@ frp_hex <-
   geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
   geom_hex(data = hexdf_forest, aes(x = x, y = y),
            color = 'grey50', fill = '#585858', stat = 'identity') +
-  geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
+  # geom_hex(data = hexdf_burned, aes(x = x, y = y),
+  #          color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
   geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = frp_bin ),
            color = 'black', stat = 'identity') +
-  scale_fill_distiller('Fire rotation \nperiod (yrs)', palette = 'PuOr', direction =1,
+  geom_curve(data = eg_data,
+             aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
+             arrow = arrow(length=unit(0.15,"cm")), 
+             color = 'black', curvature = -0.5, size = 1.5) +
+  scale_fill_distiller('Fire rotation \nperiod (yrs)', palette = 'RdPu', direction =1,
                        limits = c(50,250), oob = scales::squish) +
   labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
-  theme_bw(base_size = 10) +
+  theme_bw(base_size = 24) +
   theme(axis.text = element_text(color = 'black'),
-        legend.position = c(0.86,0.82),,
+        legend.position = c(0.82,0.83),
         legend.background = element_blank(),
-        legend.title = element_text(size = 9),
-        legend.text = element_text(size = 8)) 
+        legend.title = element_text(size = 26),
+        legend.text = element_text(size = 24)) 
 frp_hex
 
 # CBI
@@ -198,19 +189,23 @@ cbi_hex <-
   geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
   geom_hex(data = hexdf_forest, aes(x = x, y = y),
            color = 'grey50', fill = '#585858', stat = 'identity') +
-  geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
+  # geom_hex(data = hexdf_burned, aes(x = x, y = y),
+  #          color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
   geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = cbi_bin),
            color = 'black', stat = 'identity') +
-  scale_fill_distiller('Burn severity \n(CBI)', palette = 'RdYlGn',
+  geom_curve(data = eg_data,
+             aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
+             arrow = arrow(length=unit(0.15,"cm")), 
+             color = 'black', curvature = -0.5, size = 1.5) +
+  scale_fill_distiller('Burn severity \n(CBI)', palette = 'OrRd', direction = 1,
                        limits = c(1.3,2), oob = scales::squish) +
   labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
-  theme_bw(base_size = 10) +
+  theme_bw(base_size = 24) +
   theme(axis.text = element_text(color = 'black'),
-        legend.position = c(0.86,0.82),,
+        legend.position = c(0.82,0.83),
         legend.background = element_blank(),
-        legend.title = element_text(size = 9),
-        legend.text = element_text(size = 8)) 
+        legend.title = element_text(size = 26),
+        legend.text = element_text(size = 24)) 
 
 # NDVI
 ndvi_hex <- 
@@ -218,26 +213,30 @@ ndvi_hex <-
   geom_blank(data = hexdf_forest, aes(x = x, y = y)) +
   geom_hex(data = hexdf_forest, aes(x = x, y = y),
            color = 'grey50', fill = '#585858', stat = 'identity') +
-  geom_hex(data = hexdf_burned, aes(x = x, y = y),
-           color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
+  # geom_hex(data = hexdf_burned, aes(x = x, y = y),
+  #          color = 'grey50', fill = 'black', stat = 'identity') + #alpha = 0.7,
   geom_hex(data = hexdf_burned_n, aes(x = x, y = y, fill = ndvi_bin),
            color = 'black', stat = 'identity') +
-  scale_fill_distiller('Productivity \n(NDVI)', palette = 'BrBG', direction = 1,
+  geom_curve(data = eg_data,
+             aes(x = def_hist, y = aet_hist, xend = def_2C, yend = aet_2C),
+             arrow = arrow(length=unit(0.15,"cm")), 
+             color = 'black', curvature = -0.5, size = 1.5) +
+  scale_fill_distiller('Productivity \n(NDVI)', palette = 'YlGn', direction = 1,
                        limits = c(0.45,0.80), oob = scales::squish) +
   labs(y = 'Actual evapotranspiration (mm)', x = 'Climatic water deficit (mm)') +
-  theme_bw(base_size = 10) +
+  theme_bw(base_size = 24) +
   theme(axis.text = element_text(color = 'black'),
-        legend.position = c(0.86,0.82),,
+        legend.position = c(0.82,0.83),
         legend.background = element_blank(),
-        legend.title = element_text(size = 9),
-        legend.text = element_text(size = 8)) 
+        legend.title = element_text(size = 26),
+        legend.text = element_text(size = 24)) 
 
 
 library(cowplot)
-panel_hex <- plot_grid(frp_hex, cbi_hex, ndvi_hex, nrow = 1)
+panel_hex <- plot_grid(frp_hex, ndvi_hex, cbi_hex, nrow = 2, ncol = 2)
 panel_hex
 ggsave('three_panel_hex.png', path = 'C:/Users/hoecker/Work/Postdoc/Future_Fire/Progress_Figs/',
-       height = 5, width = 15, dpi = 500)
+       height = 18, width = 18, dpi = 500)
 
 # ------------------------------------------------------------------------------
 # Mapping

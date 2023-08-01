@@ -1,8 +1,14 @@
-# This step is purely mechanical 
-# It creates subsets of data that are called upon during a parallel processing step
+# ------------------------------------------------------------------------------
+# Description: This step is purely mechanical; creates subsets of data that are 
+# called upon during parallel processing later
+# ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# Load packages
+# ------------------------------------------------------------------------------
 library(tidyverse)
 library(furrr)
+
 # ------------------------------------------------------------------------------
 # Rescale pyroclimate dimensions, 
 # ------------------------------------------------------------------------------
@@ -14,15 +20,36 @@ rescale0100 <- function(x){round(((x-min(x))/(max(x)-min(x)))*100,3)}
 # Create a list of unique reference-future climate cell pairs (its 1723) - based on all possible forested climate bins
 forest_pyrome_df <- readRDS('data/process/forest_pyrome_df.Rdata')
 
-cell_pairs <- forest_pyrome_df %>% 
+cell_pairs <- forest_pyrome_df |> 
   dplyr::select(cell_hist, cell_2C) %>% 
   distinct() %>% 
   split(seq(nrow(.)))
 
 # Add columns for all variables that are rescaled from 0-100
-rescale_pyrome_df <- pyrome_df %>% 
-  dplyr::select(cell_hist, cell_2C, cbi, ndvi, log_frp_pt, pca1, pca2) %>% 
-  mutate(across(c(cbi, ndvi, log_frp_pt, pca1, pca2), ~ rescale0100(.x), .names = 'z_{.col}'))
+rescale_pyrome_df <- pyrome_df |> 
+  dplyr::select(X, Y, aet_hist, def_hist, cell_hist, cell_2C, cbi, ndvi, frp_pt, frp_pt) |> 
+  mutate(across(c(def_hist, aet_hist, cbi, ndvi, frp_pt), ~ rescale0100(.x), .names = 'z_{.col}'))
+
+
+#-------------------------------------------------------------------------------
+# TEST MODELS
+library(lme4)
+
+train_df <- rescale_pyrome_df |> 
+  slice_sample(n = 100000)
+
+model <- lmer(log_frp_pt ~ z_def_hist:z_aet_hist + (1|cell_hist), data = train_df)
+
+summary(model)
+MuMIn::r.squaredGLMM(model)
+
+ggplot(train_df, aes(x = z_def_hist, y = z_cbi)) +
+  geom_point()+
+  geom_smooth()
+
+#-------------------------------------------------------------------------------
+
+
 
 # ------------------------------------------------------------------------------
 # Create and save chunks of data to optimize parallel processing 

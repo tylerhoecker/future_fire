@@ -1,8 +1,14 @@
-# Prepares dataframe of fire niche dimensions
-# CBI (severity) and NDVI (productivity) from data from Sean Parks
-# Calculates FRI from MTBS perimeter data
-# Extracts fire resistance scores from Jens Stevens dataset
-# Extracts TerraClimate climate data from TIFFs provided by SP
+# ------------------------------------------------------------------------------
+# Description: Prepare dataset for analysis from published data, save for use in 
+# subsequent scripts. Burn severity, productivity, fire occurrence, and climate 
+# data are harmonized.
+#
+# Input data that are publicly available elsewhere are not re-published in 
+# this archive. The code in this script illustrates how the dataset we used for 
+# analysis was created from publicly available data.
+# A minimal dataset, which can be used to reproduce our analysis,
+# is read in at the end of the script. 
+# ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
 # Load packages
@@ -12,10 +18,6 @@ library(raster)
 library(terra)
 library(sf)
 select <- dplyr::select
-# ------------------------------------------------------------------------------
-# Stop: Skip to line XXX to use dataset already created and save time!
-# ------------------------------------------------------------------------------
-
 # ------------------------------------------------------------------------------
 # Use dataframe which includes CBI and NDVI as the sample
 # Eventually, the centroid of every burned 30x30m pixel in the western US
@@ -39,22 +41,22 @@ fire_veg_df <- fire_veg_df_full %>%
 # Make dataframe spatial first with coordinates
 fire_veg_sf <- st_as_sf(fire_veg_df, coords = c('x', 'y'), crs = 4326)
 
-
-
 # ------------------------------------------------------------------------------
 # Create master grid 
 # ------------------------------------------------------------------------------
 # Stevens et al. FRS gridded dataset has the most constrained extent, so use
-# this to create a master grid for masking out proceeding layers
+# this to create a master grid for masking out proceeding layers.
+# frs_spatial is available here: https://www.sciencebase.gov/catalog/item/5e39f54ee4b0a79317e15e73
+
 # This produces a coarser version of the Stevens layer 
-# frs_rast <- rast('data/composition/frs_spatial.tif')
-# frs_rast <- terra::project(frs_rast, y = "epsg:4326")
-# mast_rast <- terra::aggregate(frs_rast,
-#                               fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
-#                               fun = 'modal', na.rm = T) %>%
-#   classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE))
-# 
-# writeRaster(mast_rast, 'data/process/mast_rast.tif', overwrite=T)
+frs_rast <- rast('data/composition/frs_spatial.tif')
+frs_rast <- terra::project(frs_rast, y = "epsg:4326")
+mast_rast <- terra::aggregate(frs_rast,
+                              fact = c((1/96)/xres(frs_rast),(1/96)/yres(frs_rast)),
+                              fun = 'modal', na.rm = T) %>%
+  classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE))
+
+writeRaster(mast_rast, 'data/process/mast_rast.tif', overwrite=T)
 mast_rast <- rast('data/process/mast_rast.tif')
 # ------------------------------------------------------------------------------
 # Filter out fire-veg points that fall outside this more restrictive definition 
@@ -120,12 +122,11 @@ forest_frp_grid <-  mast_rast %>%
   classify(., matrix(c(0,1,1), ncol=3, byrow=TRUE)) %>%
   classify(., cbind(NA, 0)) %>%
   terra::aggregate(.,
-                   fact = c((1/8)/xres(reburn_rast),
-                            (1/8)/yres(reburn_rast)),
+                   fact = c((1/8)/xres(.),
+                            (1/8)/yres(.)),
                    fun = mean, na.rm = T)
 
 forest_prop_fire_pts <- terra::extract(forest_frp_grid, st_coordinates(fire_veg_sf))
-
 
 # Produce a dataframe with FRP values for all pyroclimate points
 frp_df <- 
@@ -166,6 +167,7 @@ writeRaster(frp_grid, 'data/process/frp_grid_yrs_1-8.tiff', overwrite=TRUE)
 pyroclimate_input_df <- cbind(fire_veg_df, climate_fire_pts, frp_df) %>% 
   # Probably due to reprojection, 5 points from CA land outside the climate raster
   filter(aet_hist > 0)
+
 saveRDS(pyroclimate_input_df, 'data/process/pyroclimate_input_df.Rdata')
 
 # Transform to dataframe and filter out non-forest cells, unrealistic AET vals
@@ -182,29 +184,15 @@ forest_clim_df <- forest_pts_sp %>%
 
 saveRDS(forest_clim_df, 'data/process/forest_clim_df.Rdata')
 # ------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Read in minimal dataset, to run proceeding steps, here
+# ------------------------------------------------------------------------------
 forest_clim_df <- readRDS('data/process/forest_clim_df.Rdata')
+pyroclimate_input_df <-  readRDS('data/process/pyroclimate_input_df.Rdata')
 # ------------------------------------------------------------------------------
-
-
 # ------------------------------------------------------------------------------
-# Some checks
-# ------------------------------------------------------------------------------
-# Maps for checking 
-plot_df <- fire_veg_df %>% 
-  slice_sample(n = 100000)
-
-plot_sf <- st_as_sf(plot_df, coords = c('x', 'y'), crs = 4326)
-boundary <- read_sf("C:\\Users\\hoecker\\Work\\GIS\\cb_2018_us_state_20m\\cb_2018_us_state_20m.shp") %>%
-  st_transform(., crs = 4326)
-
-tm_shape(boundary, bbox = plot_sf) +
-  tm_borders() +
-  tm_fill(col = 'grey10') +
-  tm_shape(plot_sf) +
-  tm_dots(col = 'cbi',
-          size = 0.003,
-          #palette = c('#8c510a','#f6e8c3','#01665e'),
-          style = 'quantile',
-          shape = 15) 
 
 
