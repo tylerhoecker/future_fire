@@ -31,26 +31,6 @@ rescale_pyrome_df <- pyrome_df |>
   mutate(across(c(def_hist, aet_hist, cbi, ndvi, frp_pt), ~ rescale0100(.x), .names = 'z_{.col}'))
 
 
-#-------------------------------------------------------------------------------
-# TEST MODELS
-library(lme4)
-
-train_df <- rescale_pyrome_df |> 
-  slice_sample(n = 100000)
-
-model <- lmer(log_frp_pt ~ z_def_hist:z_aet_hist + (1|cell_hist), data = train_df)
-
-summary(model)
-MuMIn::r.squaredGLMM(model)
-
-ggplot(train_df, aes(x = z_def_hist, y = z_cbi)) +
-  geom_point()+
-  geom_smooth()
-
-#-------------------------------------------------------------------------------
-
-
-
 # ------------------------------------------------------------------------------
 # Create and save chunks of data to optimize parallel processing 
 # ------------------------------------------------------------------------------

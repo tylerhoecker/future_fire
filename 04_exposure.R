@@ -108,12 +108,6 @@ calc_emds <- function(ref_df, fut_df, cell_pairs, index){
           infer::rep_slice_sample(n = n_samp, reps = n_reps) %>%
           group_map(~rep_prep(.x))
 
-    # Visualize examples    
-    # ggplot() +
-    #   stat_ecdf(aes(x = sample_dfs[['ref']][[rep]][,c('z_cbi')]), size = 1, color = 'red') +
-    #   stat_ecdf(aes(x = sample_dfs[['fut']][[rep]][,c('z_cbi')]), size = 1, color = 'blue') 
-    
-
     # Calculate multi EMD for each replicate
     rep_emds <- c(1:n_reps) %>%
       map_dbl(function(rep){
